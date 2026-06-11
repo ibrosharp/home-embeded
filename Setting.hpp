@@ -1,0 +1,88 @@
+#ifndef SETTING_H
+#define SETTING_H
+
+#include "PreferenceModel.hpp"
+#include "JsonSerializable.hpp"
+#include "StorageManager.hpp"
+#include <Arduino.h>
+
+extern void triggerFeedback();
+
+class Setting : public PreferenceModel, public JsonSerializable {
+private:
+    String wifiSSID;
+    String wifiPassword;
+    float defaultTargetTemp;
+    bool ledFeedbackEnabled;
+    const char* namespaceName; // NVS requires a namespace (max 15 characters)
+    StorageManager* _storage;
+
+public:
+    Setting(const char* ns, StorageManager* storage = nullptr) 
+        : namespaceName(ns), defaultTargetTemp(24.0), ledFeedbackEnabled(true), _storage(storage) {}
+
+    void setStorage(StorageManager* storage) { _storage = storage; }
+
+    // Getters and Setters
+    void setWifi(String ssid, String pass) { 
+        wifiSSID = ssid; 
+        wifiPassword = pass; 
+        if (_storage) {
+            save(_storage->prefs());
+        }
+        triggerFeedback();
+    }
+    void setTargetTemp(float temp) { 
+        defaultTargetTemp = temp; 
+        if (_storage) {
+            save(_storage->prefs());
+        }
+        triggerFeedback();
+    }
+    float getTargetTemp() { return defaultTargetTemp; }
+    String getWifiSSID() const { return wifiSSID; }
+    String getWifiPassword() const { return wifiPassword; }
+    bool isLedFeedbackEnabled() const { return ledFeedbackEnabled; }
+    void setLedFeedbackEnabled(bool enabled) { 
+        ledFeedbackEnabled = enabled; 
+        if (_storage) {
+            save(_storage->prefs());
+        }
+        triggerFeedback();
+    }
+    const char* getNamespace() const { return namespaceName; }
+
+    // Implement the toJson() interface method
+    String toJson() override {
+        String json = "{";
+        json += "\"type\":\"settings\",";
+        json += "\"wifiSSID\":\"" + wifiSSID + "\",";
+        json += "\"wifiPassword\":\"" + wifiPassword + "\",";
+        json += "\"defaultTargetTemp\":" + String(defaultTargetTemp, 2) + ",";
+        json += "\"ledFeedbackEnabled\":" + String(ledFeedbackEnabled ? "true" : "false") + ",";
+        json += "\"namespace\":\"" + String(namespaceName) + "\"";
+        json += "}";
+        return json;
+    }
+
+    // Implement the save() interface method
+    bool save(Preferences &prefs) override {
+        prefs.putString("wifi_ssid", wifiSSID);
+        prefs.putString("wifi_pass", wifiPassword);
+        prefs.putFloat("temp", defaultTargetTemp);
+        prefs.putBool("led", ledFeedbackEnabled);
+        return true;
+    }
+
+    // Implement the load() interface method
+    bool load(Preferences &prefs) override {
+        // The second argument provides a default value if the key doesn't exist yet
+        wifiSSID = prefs.getString("wifi_ssid", "");
+        wifiPassword = prefs.getString("wifi_pass", "");
+        defaultTargetTemp = prefs.getFloat("temp", 24.0);
+        ledFeedbackEnabled = prefs.getBool("led", true);
+        return true;
+    }
+};
+
+#endif
