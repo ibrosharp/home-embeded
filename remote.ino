@@ -3,7 +3,7 @@
 #include <Wire.h>
 #include <Adafruit_MCP23X17.h>
 #include <WiFi.h>
-#include <WebServer.h>
+#include <ESPAsyncWebServer.h>
 
 #include "SmartWebServer.hpp"
 #include "TaskQueueManager.hpp"

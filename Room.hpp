@@ -173,7 +173,7 @@ inline Relay* Room::findRelayByPin(uint8_t pin) const {
 }
 
 inline String Room::toJson() {
-    String json = "{\"type\":\"room\",\"relays\":[";
+    String json = "{\"type\":\"room\",\"loads\":[";
     for (int i = 0; i < _relayCount; i++) {
         if (i > 0) json += ",";
         if (_relays[i] != nullptr) json += _relays[i]->toJson();

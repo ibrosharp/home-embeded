@@ -204,10 +204,10 @@ String Switch::toJson() {
     json += "\"lastState\":" + String(_lastState) + ",";
     json += "\"debounceDelay\":" + String(_debounceDelay) + ",";
     if (_relay != nullptr) {
-        json += "\"hasRelay\":true,";
-        json += "\"relay\":" + _relay->toJson();
+        json += "\"hasLoad\":true,";
+        json += "\"load\":" + _relay->toJson();
     } else {
-        json += "\"hasRelay\":false";
+        json += "\"hasLoad\":false";
     }
     json += "}";
     return json;

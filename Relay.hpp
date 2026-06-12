@@ -128,7 +128,7 @@ bool Relay::getState() const {
 
 String Relay::toJson() {
     String json = "{";
-    json += "\"type\":\"relay\",";
+    json += "\"type\":\"load\",";
     json += "\"pin\":" + String(_pin) + ",";
     json += "\"key\":\"" + String(_storageKey ? _storageKey : "null") + "\",";
     json += "\"state\":" + String(isOn() ? "true" : "false") + ",";
