@@ -269,7 +269,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Only rebuild DOM if the number of switches changed to avoid focus loss
     if (switchesContainer.children.length !== switches.length) {
       switchesContainer.innerHTML = '';
-      switches.forEach(sw => {
+      switches.forEach((sw, index) => {
         const loadState = sw.hasLoad && sw.load ? sw.load.state : false;
         const isActive = sw.hasLoad ? loadState : (sw.state === 1);
 
@@ -277,19 +277,20 @@ document.addEventListener('DOMContentLoaded', () => {
         div.className = `switch-card ${isActive ? 'active' : ''}`;
         div.id = `card-switch-${sw.pin}`;
 
+        const loadIdx = sw.hasLoad && sw.load && cachedLoads ? cachedLoads.findIndex(l => l.pin === sw.load.pin) : -1;
+        const loadName = loadIdx >= 0 ? `Load ${loadIdx + 1}` : '?';
         const loadBadge = sw.hasLoad
-          ? `<span class="load-badge">⚡ Load ${sw.load ? sw.load.pin : '?'}</span>`
+          ? `<span class="load-badge">⚡ ${loadName}</span>`
           : `<span class="load-badge" style="opacity:0.4">No Load</span>`;
 
         div.innerHTML = `
           <div class="switch-header">
-            <h3>Switch ${sw.pin}</h3>
+            <h3>Switch ${index + 1}</h3>
             ${loadBadge}
           </div>
           <div class="switch-actions">
-            <span class="pin-label">PIN: ${sw.pin}</span>
             <button class="action-btn trigger-btn" data-pin="${sw.pin}" data-isactive="${isActive}">Toggle</button>
-            <button class="action-btn small load-attach-btn btn-secondary" data-pin="${sw.pin}" data-has-load="${sw.hasLoad}" data-load-pin="${sw.hasLoad && sw.load ? sw.load.pin : -1}" title="Manage load">${sw.hasLoad ? 'Manage Load' : 'Assign Load'}</button>
+            <button class="action-btn small load-attach-btn btn-secondary" data-pin="${sw.pin}" data-index="${index + 1}" data-has-load="${sw.hasLoad}" data-load-pin="${sw.hasLoad && sw.load ? sw.load.pin : -1}" title="Manage load">${sw.hasLoad ? 'Manage Load' : 'Assign Load'}</button>
           </div>
         `;
         switchesContainer.appendChild(div);
@@ -322,8 +323,9 @@ document.addEventListener('DOMContentLoaded', () => {
       document.querySelectorAll('.load-attach-btn').forEach(el => {
         el.addEventListener('click', (e) => {
           const pin = e.currentTarget.dataset.pin;
+          const index = e.currentTarget.dataset.index;
           const currentLoadPin = parseInt(e.currentTarget.dataset.loadPin);
-          openLoadModal(pin, currentLoadPin);
+          openLoadModal(pin, `Switch ${index}`, currentLoadPin);
         });
       });
     } else {
@@ -345,7 +347,9 @@ document.addEventListener('DOMContentLoaded', () => {
           const loadBadgeEl = card.querySelector('.load-badge');
           if (loadBadgeEl) {
             if (sw.hasLoad && sw.load) {
-              loadBadgeEl.textContent = `⚡ Load ${sw.load.pin}`;
+              const loadIdx = cachedLoads ? cachedLoads.findIndex(l => l.pin === sw.load.pin) : -1;
+              const loadName = loadIdx >= 0 ? `Load ${loadIdx + 1}` : '?';
+              loadBadgeEl.textContent = `⚡ ${loadName}`;
               loadBadgeEl.style.opacity = '1';
             } else {
               loadBadgeEl.textContent = 'No Load';
@@ -380,7 +384,7 @@ document.addEventListener('DOMContentLoaded', () => {
     loadsContainer.dataset.lastJson = loadsJson;
 
     loadsContainer.innerHTML = '';
-    loads.forEach(load => {
+    loads.forEach((load, index) => {
       const isOn = load.state === true;
       const div = document.createElement('div');
       div.className = `load-card ${isOn ? 'active' : ''}`;
@@ -388,14 +392,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
       div.innerHTML = `
         <div class="load-header">
-          <h3>Load ${load.pin}</h3>
+          <h3>Load ${index + 1}</h3>
           <div style="display:flex; gap:10px; align-items:center;">
             <div class="load-state-dot ${isOn ? 'on' : 'off'}"></div>
             <button class="action-btn load-trigger-btn" data-pin="${load.pin}">Toggle</button>
           </div>
         </div>
         <div class="load-meta">
-          <span class="load-meta-item"><span class="pin-label">PIN: ${load.pin}</span></span>
           <span class="load-meta-item" style="color: ${load.activeLow ? '#ff9966' : 'var(--text-muted)'}">
             ${load.activeLow ? '⚡ Active-Low' : 'Active-High'}
           </span>
@@ -621,14 +624,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ======================== Load Attach Modal ========================
 
-  function openLoadModal(switchPin, currentLoadPin) {
-    inputLoadSwitchPin.value = switchPin;
+  function openLoadModal(switchPin, switchName, currentLoadPin) {
+    // We store the pin in a data attribute to use for the API call, but show the friendly name
+    inputLoadSwitchPin.dataset.pin = switchPin;
+    inputLoadSwitchPin.value = switchName;
 
     // Populate load dropdown from cached loads
     inputLoadPin.innerHTML = '<option value="-1">— Detach (No Load) —</option>';
-    cachedLoads.forEach(load => {
+    cachedLoads.forEach((load, index) => {
       const selected = load.pin === currentLoadPin ? 'selected' : '';
-      inputLoadPin.innerHTML += `<option value="${load.pin}" ${selected}>Load Pin ${load.pin} (${load.state ? 'ON' : 'OFF'})</option>`;
+      inputLoadPin.innerHTML += `<option value="${load.pin}" ${selected}>Load ${index + 1} (${load.state ? 'ON' : 'OFF'})</option>`;
     });
 
     loadModal.classList.add('active');
@@ -719,7 +724,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   loadForm.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const switchPin = inputLoadSwitchPin.value;
+    const switchPin = inputLoadSwitchPin.dataset.pin;
     const loadPin = inputLoadPin.value;
 
     const submitBtn = document.getElementById('btn-submit-load');
