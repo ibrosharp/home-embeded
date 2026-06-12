@@ -79,10 +79,10 @@ static inline void logError(const char* tag, const String& message) {
 HardwareManager& hwInstance = HardwareManager::getInstance();
 
 static Relay relays[4] = {
-    Relay(hwInstance, MCP_RELAY_1, "relay_1", globalStorage),
-    Relay(hwInstance, MCP_RELAY_2, "relay_2", globalStorage),
-    Relay(hwInstance, MCP_RELAY_4, "relay_4", globalStorage),
-    Relay(hwInstance, MCP_RELAY_3, "relay_3", globalStorage)
+    Relay(hwInstance, MCP_RELAY_1, "relay_1", globalStorage, true),
+    Relay(hwInstance, MCP_RELAY_2, "relay_2", globalStorage, true),
+    Relay(hwInstance, MCP_RELAY_4, "relay_4", globalStorage, true),
+    Relay(hwInstance, MCP_RELAY_3, "relay_3", globalStorage, true)
 };
 
 static Switch switches[12] = {

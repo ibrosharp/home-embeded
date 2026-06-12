@@ -289,7 +289,7 @@ document.addEventListener('DOMContentLoaded', () => {
           <div class="switch-actions">
             <span class="pin-label">PIN: ${sw.pin}</span>
             <button class="action-btn trigger-btn" data-pin="${sw.pin}" data-isactive="${isActive}">Toggle</button>
-            <button class="action-btn small load-attach-btn" data-pin="${sw.pin}" data-has-load="${sw.hasLoad}" data-load-pin="${sw.hasLoad && sw.load ? sw.load.pin : -1}" title="Manage load">⚡</button>
+            <button class="action-btn small load-attach-btn btn-secondary" data-pin="${sw.pin}" data-has-load="${sw.hasLoad}" data-load-pin="${sw.hasLoad && sw.load ? sw.load.pin : -1}" title="Manage load">${sw.hasLoad ? 'Manage Load' : 'Assign Load'}</button>
           </div>
         `;
         switchesContainer.appendChild(div);
@@ -358,6 +358,7 @@ document.addEventListener('DOMContentLoaded', () => {
           if (attachBtn) {
             attachBtn.dataset.hasLoad = sw.hasLoad;
             attachBtn.dataset.loadPin = sw.hasLoad && sw.load ? sw.load.pin : -1;
+            attachBtn.textContent = sw.hasLoad ? 'Manage Load' : 'Assign Load';
           }
         }
       });
