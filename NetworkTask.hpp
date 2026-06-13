@@ -8,6 +8,7 @@
 #include "StorageManager.hpp"
 #include "LoggingTask.hpp"
 #include "Room.hpp"
+#include "ErrorManager.hpp"
 
 
 // Use extern to link cleanly to globals in remote.ino without collisions
@@ -53,7 +54,8 @@ inline void WebServerTask(void* pvParameters) {
     }
 
     if (WiFi.status() == WL_CONNECTED) {
-        digitalWrite(LED_INDICATOR, HIGH); // Solid ON when successfully connected
+        ErrorManager::getInstance().clearError(ERROR_WIFI_CONNECT);
+        if (!ErrorManager::getInstance().hasErrors()) digitalWrite(LED_INDICATOR, HIGH); // Solid ON when successfully connected
         sysQueue.push(new Firmware::LoggingTask(Firmware::LogLevel::DEBUG, "NETWORK", "Connected via DHCP! Capturing gateway data..."));
 
         IPAddress gateway    = WiFi.gatewayIP();
@@ -73,6 +75,7 @@ inline void WebServerTask(void* pvParameters) {
         myWebServer.begin(SmartWebServer::MODE_OPERATIONAL);
 
     } else {
+        ErrorManager::getInstance().setError(ERROR_WIFI_CONNECT);
         sysQueue.push(new Firmware::LoggingTask(Firmware::LogLevel::DEBUG, "NETWORK", "Home Router Not Found. Falling back to Config AP..."));
         
         WiFi.disconnect(true, true); 
@@ -97,7 +100,7 @@ inline void WebServerTask(void* pvParameters) {
     }
 
     bool lastConnected = (WiFi.status() == WL_CONNECTED);
-    if (lastConnected) {
+    if (lastConnected && !ErrorManager::getInstance().hasErrors()) {
         digitalWrite(LED_INDICATOR, HIGH);
     }
 
@@ -108,18 +111,22 @@ inline void WebServerTask(void* pvParameters) {
         if (currentConnected != lastConnected) {
             lastConnected = currentConnected;
             if (currentConnected) {
-                digitalWrite(LED_INDICATOR, HIGH);
+                ErrorManager::getInstance().clearError(ERROR_WIFI_CONNECT);
+                if (!ErrorManager::getInstance().hasErrors()) digitalWrite(LED_INDICATOR, HIGH);
+            } else {
+                ErrorManager::getInstance().setError(ERROR_WIFI_CONNECT);
             }
         }
 
-        // Handle LED blinking if WiFi is not connected (AP/Config mode)
         if (!currentConnected) {
             static unsigned long lastBlink = 0;
             static bool apLedState = false;
             if (millis() - lastBlink > 1000) { // Slow blink (1 second interval)
                 lastBlink = millis();
                 apLedState = !apLedState;
-                digitalWrite(LED_INDICATOR, apLedState ? HIGH : LOW);
+                if (!ErrorManager::getInstance().hasErrors()) {
+                    digitalWrite(LED_INDICATOR, apLedState ? HIGH : LOW);
+                }
             }
         }
         

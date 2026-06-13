@@ -6,6 +6,7 @@
 #include "JsonSerializable.hpp"
 #include "LoggingTask.hpp"
 #include "TaskQueueManager.hpp"
+#include "ErrorManager.hpp"
 
 extern TaskQueueManager sysQueue;
 
@@ -54,6 +55,7 @@ void ClimateSensor::update() {
         if (isnan(t) || isnan(h)) {
             if (_isHealthy) {
                 _isHealthy = false;
+                ErrorManager::getInstance().setError(ERROR_DHT_SENSOR);
                 sysQueue.push(new Firmware::LoggingTask(Firmware::LogLevel::WARNING, "CLIMATE", String("ClimateSensor read failed (nan)")));
             }
         } else {
@@ -61,6 +63,7 @@ void ClimateSensor::update() {
             _lastHumidity = h;
             if (!_isHealthy) {
                 _isHealthy = true;
+                ErrorManager::getInstance().clearError(ERROR_DHT_SENSOR);
                 sysQueue.push(new Firmware::LoggingTask(Firmware::LogLevel::INFO, "CLIMATE", String("ClimateSensor recovered and online")));
             }
         }

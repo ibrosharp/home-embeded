@@ -58,6 +58,15 @@ private:
     void handleSwitchLoad(AsyncWebServerRequest *request);   
     void handleLoadToggle(AsyncWebServerRequest *request);
     
+    // Automation
+    void handleLightAutomation(AsyncWebServerRequest *request);
+    void handleUpdateLightAutomation(AsyncWebServerRequest *request);
+    void handleClimateAutomation(AsyncWebServerRequest *request);
+    void handleUpdateClimateAutomation(AsyncWebServerRequest *request);
+    
+    // History
+    void handleHistory(AsyncWebServerRequest *request);
+    
     // OTA Endpoints
     void handleUpdateGet(AsyncWebServerRequest *request);
     void handleUpdatePost(AsyncWebServerRequest *request);
@@ -112,6 +121,11 @@ void SmartWebServer::begin(ServerMode mode) {
     _server.on("/api/switch/state", HTTP_POST, [this](AsyncWebServerRequest *request) { REQUIRE_AUTH; this->handleSwitchState(request); });
     _server.on("/api/switch/load", HTTP_POST, [this](AsyncWebServerRequest *request) { REQUIRE_AUTH; this->handleSwitchLoad(request); });
     _server.on("/api/load/toggle", HTTP_POST, [this](AsyncWebServerRequest *request) { REQUIRE_AUTH; this->handleLoadToggle(request); });
+    _server.on("/api/automation/light", HTTP_GET, [this](AsyncWebServerRequest *request) { REQUIRE_AUTH; this->handleLightAutomation(request); });
+    _server.on("/api/automation/light", HTTP_POST, [this](AsyncWebServerRequest *request) { REQUIRE_AUTH; this->handleUpdateLightAutomation(request); });
+    _server.on("/api/automation/climate", HTTP_GET, [this](AsyncWebServerRequest *request) { REQUIRE_AUTH; this->handleClimateAutomation(request); });
+    _server.on("/api/automation/climate", HTTP_POST, [this](AsyncWebServerRequest *request) { REQUIRE_AUTH; this->handleUpdateClimateAutomation(request); });
+    _server.on("/api/history", HTTP_GET, [this](AsyncWebServerRequest *request) { REQUIRE_AUTH; this->handleHistory(request); });
     
     // OTA Routes
     _server.on("/update", HTTP_GET, [this](AsyncWebServerRequest *request) { REQUIRE_AUTH; this->handleUpdateGet(request); });
@@ -408,6 +422,69 @@ void SmartWebServer::handleUpdateGet(AsyncWebServerRequest *request) {
     request->send(200, "text/html", html);
 }
 
+// GET /api/automation/light
+void SmartWebServer::handleLightAutomation(AsyncWebServerRequest *request) {
+    Room& room = Room::getInstance();
+    LightAutomation* autoMgr = room.getLightAutomation();
+    if (autoMgr) {
+        request->send(200, "application/json", autoMgr->toJson());
+    } else {
+        request->send(404, "application/json", "{\"error\":\"Automation not found\"}");
+    }
+}
+
+// POST /api/automation/light
+void SmartWebServer::handleUpdateLightAutomation(AsyncWebServerRequest *request) {
+    Room& room = Room::getInstance();
+    LightAutomation* autoMgr = room.getLightAutomation();
+    if (!autoMgr) {
+        request->send(404, "application/json", "{\"error\":\"Automation not found\"}");
+        return;
+    }
+
+    bool enabled = false;
+    if (hasArg(request, "enabled")) {
+        String enStr = getArg(request, "enabled");
+        enabled = (enStr == "true" || enStr == "1");
+    }
+
+    float threshold = 2.0f;
+    if (hasArg(request, "threshold")) {
+        threshold = getArg(request, "threshold").toFloat();
+    }
+
+    std::vector<uint8_t> loadPins;
+    if (hasArg(request, "loadPins")) {
+        String pinsStr = getArg(request, "loadPins");
+        if (pinsStr.length() > 0) {
+            int startIndex = 0;
+            int commaIndex = pinsStr.indexOf(',');
+            while (commaIndex != -1) {
+                loadPins.push_back((uint8_t)pinsStr.substring(startIndex, commaIndex).toInt());
+                startIndex = commaIndex + 1;
+                commaIndex = pinsStr.indexOf(',', startIndex);
+            }
+            if (startIndex < pinsStr.length()) {
+                loadPins.push_back((uint8_t)pinsStr.substring(startIndex).toInt());
+            }
+        }
+    }
+
+    bool autoOffEnabled = false;
+    if (hasArg(request, "autoOffEnabled")) {
+        String enStr = getArg(request, "autoOffEnabled");
+        autoOffEnabled = (enStr == "true" || enStr == "1");
+    }
+
+    uint16_t autoOffTimeoutSeconds = 300;
+    if (hasArg(request, "autoOffTimeoutSeconds")) {
+        autoOffTimeoutSeconds = getArg(request, "autoOffTimeoutSeconds").toInt();
+    }
+
+    autoMgr->setConfig(enabled, threshold, loadPins, autoOffEnabled, autoOffTimeoutSeconds);
+    request->send(200, "application/json", "{\"success\":true}");
+}
+
 // POST /update - Final response after the upload stream finishes
 void SmartWebServer::handleUpdatePost(AsyncWebServerRequest *request) {
     AsyncWebServerResponse *response = request->beginResponse(200, "application/json", Update.hasError() ? "{\"success\":false,\"error\":\"Update failed\"}" : "{\"success\":true,\"message\":\"Update success. Rebooting...\"}");
@@ -437,6 +514,62 @@ void SmartWebServer::handleUpdateUpload(AsyncWebServerRequest *request, String f
             Update.printError(Serial);
         }
     }
+}
+
+// GET /api/history
+void SmartWebServer::handleHistory(AsyncWebServerRequest *request) {
+    Room& room = Room::getInstance();
+    HistoryBuffer* history = room.getHistoryBuffer();
+    if (!history) {
+        request->send(404, "application/json", "{\"error\":\"History buffer not found\"}");
+        return;
+    }
+    request->send(200, "application/json", history->toJson());
+}
+
+// GET /api/automation/climate
+void SmartWebServer::handleClimateAutomation(AsyncWebServerRequest *request) {
+    Room& room = Room::getInstance();
+    ClimateAutomation* autoMgr = room.getClimateAutomation();
+    if (!autoMgr) {
+        request->send(404, "application/json", "{\"error\":\"Automation not found\"}");
+        return;
+    }
+    request->send(200, "application/json", autoMgr->toJson());
+}
+
+// POST /api/automation/climate
+void SmartWebServer::handleUpdateClimateAutomation(AsyncWebServerRequest *request) {
+    Room& room = Room::getInstance();
+    ClimateAutomation* autoMgr = room.getClimateAutomation();
+    if (!autoMgr) {
+        request->send(404, "application/json", "{\"error\":\"Automation not found\"}");
+        return;
+    }
+
+    bool enabled = false;
+    if (hasArg(request, "enabled")) {
+        String enStr = getArg(request, "enabled");
+        enabled = (enStr == "true" || enStr == "1");
+    }
+
+    float targetTemp = 24.0f;
+    if (hasArg(request, "targetTemp")) {
+        targetTemp = getArg(request, "targetTemp").toFloat();
+    }
+
+    int irSlotPowerOn = -1;
+    if (hasArg(request, "irSlotPowerOn")) {
+        irSlotPowerOn = getArg(request, "irSlotPowerOn").toInt();
+    }
+
+    int irSlotPowerOff = -1;
+    if (hasArg(request, "irSlotPowerOff")) {
+        irSlotPowerOff = getArg(request, "irSlotPowerOff").toInt();
+    }
+
+    autoMgr->setConfig(enabled, targetTemp, irSlotPowerOn, irSlotPowerOff);
+    request->send(200, "application/json", "{\"success\":true}");
 }
 
 #endif

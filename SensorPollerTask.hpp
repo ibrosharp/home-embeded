@@ -21,6 +21,11 @@ inline void SensorPollerTask(void* pvParameters) {
         ClimateSensor* climate = room.getClimateSensor();
         if (climate != nullptr) {
             climate->update();
+            
+            ClimateAutomation* climateAuto = room.getClimateAutomation();
+            if (climateAuto != nullptr) {
+                climateAuto->evaluate(climate->getTemperature(), room);
+            }
         }
 
         // --- Presence (PIR motion) ---
@@ -33,6 +38,20 @@ inline void SensorPollerTask(void* pvParameters) {
         LightSensor* light = room.getLightSensor();
         if (light != nullptr) {
             light->update();
+            
+            // --- Evaluate Light Automation ---
+            LightAutomation* lightAuto = room.getLightAutomation();
+            if (lightAuto != nullptr) {
+                lightAuto->evaluate(light->getPercentage(), room);
+            }
+        }
+
+        // --- History Buffer Sampling (Every 60s) ---
+        HistoryBuffer* history = room.getHistoryBuffer();
+        if (history != nullptr && climate != nullptr && light != nullptr) {
+            if (millis() - history->getLastSampleTime() > 60000) {
+                history->addPoint(climate->getTemperature(), climate->getHumidity(), light->getPercentage());
+            }
         }
 
         // 500 ms between sensor sweeps. The DHT22 needs at least 2 s between

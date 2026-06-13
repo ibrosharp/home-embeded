@@ -9,6 +9,7 @@
 #include "TaskQueueManager.hpp"
 #include "LoggingTask.hpp"
 #include "StorageManager.hpp"
+#include "HistoryBuffer.hpp"
 #include "HardwareManager.hpp"
 #include "NetworkTask.hpp"
 #include "QueueWorkerTask.hpp"
@@ -17,10 +18,13 @@
 #include "Room.hpp"
 #include "Relay.hpp"
 #include "switch.hpp"
+#include "LightAutomation.hpp"
+#include "ClimateAutomation.hpp"
 #include "ClimateSensor.hpp"
 #include "PresenceSensor.hpp"
 #include "IRController.hpp"
 #include "IRListenerTask.hpp"
+#include "ErrorManager.hpp"
 
 #define IR_RECEIVE_PIN  7
 #define IR_SEND_PIN    10
@@ -104,6 +108,9 @@ ClimateSensor climateSensor(DHTPIN, DHTTYPE);
 IRController irController(IR_RECEIVE_PIN, IR_SEND_PIN, &globalStorage);
 PresenceSensor presenceSensor(PIR_PIN);
 LightSensor lightSensor(LIGHT_SENSOR_PIN);
+LightAutomation lightAutomation("light_auto", globalStorage);
+ClimateAutomation climateAutomation("climate_auto", globalStorage);
+HistoryBuffer historyBuffer;
 Setting roomSettings("room_settings", &globalStorage);
 
 void setup() {
@@ -113,18 +120,27 @@ void setup() {
     if (!globalStorage.begin()) {
         Serial.println("Failed to initialize Preferences storage");
         Serial.println("[FATAL] Storage begin failed.");
-        while (1) { vTaskDelay(1); }
+        pinMode(LED_INDICATOR, OUTPUT);
+        ErrorManager::getInstance().setError(ERROR_STORAGE_INIT);
+        while (1) { 
+            ErrorManager::getInstance().processLED(LED_INDICATOR, true);
+            vTaskDelay(pdMS_TO_TICKS(10)); 
+        }
     }
     Serial.println("Preferences storage ready");
     roomSettings.load(globalStorage.prefs());
     irController.load(globalStorage.prefs());
+    lightAutomation.begin();
+    climateAutomation.begin();
     
     HardwareManager& hw = HardwareManager::getInstance();
     Serial.println( "Starting I2C hardware manager");
     if (!hw.begin(I2C_SDA, I2C_SCL, 0x20)) {
         Serial.println("[SYS] Notice: Continuing setup without physical port expander.");
+        ErrorManager::getInstance().setError(ERROR_I2C_EXPANDER);
     } else {
         Serial.println("[SYS] Hardware expander connected and online.");
+        ErrorManager::getInstance().clearError(ERROR_I2C_EXPANDER);
     }
     Serial.println("Hardware manager initialized successfully");
 
@@ -139,6 +155,9 @@ void setup() {
     room.registerClimateSensor(climateSensor);
     room.registerPresenceSensor(presenceSensor);
     room.registerLightSensor(lightSensor);
+    room.registerLightAutomation(lightAutomation);
+    room.registerClimateAutomation(climateAutomation);
+    room.registerHistoryBuffer(historyBuffer);
     room.registerIRController(irController);
     room.registerSetting(roomSettings);
 
@@ -219,12 +238,23 @@ void triggerFeedback() {
 
 void loop() {
     Room& room = Room::getInstance();
-    if (room.checkAndClearFeedback()) {
-        int currentState = digitalRead(LED_INDICATOR);
-        digitalWrite(LED_INDICATOR, currentState == HIGH ? LOW : HIGH);
-        vTaskDelay(pdMS_TO_TICKS(150));
-        digitalWrite(LED_INDICATOR, currentState);
+    Setting* settings = room.getSetting();
+    bool feedbackEnabled = settings ? settings->isLedFeedbackEnabled() : true;
+
+    if (ErrorManager::getInstance().hasErrors()) {
+        ErrorManager::getInstance().processLED(LED_INDICATOR, feedbackEnabled);
+    } else {
+        // Normal state when no errors
+        // NetworkTask handles solid ON during success, but if feedback runs we need to restore it
+        // Or we just let NetworkTask control the default ON state if we don't interfere
+        if (room.checkAndClearFeedback() && feedbackEnabled) {
+            int currentState = digitalRead(LED_INDICATOR);
+            digitalWrite(LED_INDICATOR, currentState == HIGH ? LOW : HIGH);
+            vTaskDelay(pdMS_TO_TICKS(150));
+            digitalWrite(LED_INDICATOR, currentState);
+        }
     }
+
     vTaskDelay(pdMS_TO_TICKS(20));
 }
 

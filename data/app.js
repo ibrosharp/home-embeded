@@ -9,6 +9,7 @@ function getApiUrl(path) {
 
 let pollingInterval = null;
 let cachedLoads = []; // Keep load list for the load-attach modal
+let cachedHistory = null;
 
 // ======================== Toast Notification System ========================
 
@@ -58,6 +59,24 @@ document.addEventListener('DOMContentLoaded', () => {
   const loadCountBadge = document.getElementById('load-count-badge');
   const settingsStatusBadge = document.getElementById('settings-status-badge');
 
+  const irDeviceDropdown = document.getElementById('ir-device-dropdown');
+  const irDeviceSelected = document.getElementById('ir-device-selected');
+  const irDeviceOptions = document.getElementById('ir-device-options');
+  let currentSelectedDevice = 'all';
+
+  if (irDeviceSelected) {
+    irDeviceSelected.addEventListener('click', (e) => {
+      e.stopPropagation();
+      irDeviceOptions.classList.toggle('open');
+    });
+    
+    document.addEventListener('click', () => {
+      if (irDeviceOptions && irDeviceOptions.classList.contains('open')) {
+        irDeviceOptions.classList.remove('open');
+      }
+    });
+  }
+
   const configBtn = document.getElementById('btn-config');
   const configModal = document.getElementById('config-modal');
   const closeConfigBtn = document.getElementById('btn-close-modal');
@@ -104,6 +123,7 @@ document.addEventListener('DOMContentLoaded', () => {
       try {
         await fetchDeviceData();
         await fetchSettings();
+        await fetchAutomations();
       } catch (err2) {
         loadingMessage.innerHTML = '<span style="color:#ff5e62">Device Offline.</span><br><span style="color:#9ea4bb;font-size:12px">Check that ' + DEVICE_IP + ' is reachable</span>';
         // Retry every 5 seconds
@@ -128,6 +148,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (loadingOverlay.style.display !== 'none') {
       showDashboard();
       startPolling();
+      fetchHistory(); // initial fetch
+      setInterval(fetchHistory, 60000); // refresh history every 60s
     }
 
     // Update connection status
@@ -145,8 +167,28 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Cache loads for the load-attach modal
     cachedLoads = data.loads || [];
+    
+    // Also re-render the automation checkboxes if we haven't already
+    // but preserve their checked state if they are currently rendered
+    const container = document.getElementById('auto-light-loads');
+    if (container && container.innerHTML.trim() === '') {
+      fetchAutomations(); // Will render them properly with selected state
+    }
 
     return data;
+  }
+
+  async function fetchHistory() {
+    try {
+      const res = await fetch(getApiUrl('/api/history'));
+      if (res.ok) {
+        cachedHistory = await res.json();
+        // Force re-render of sensors to show new charts if we have cached sensors
+        // We will just wait for the next poll to pick it up to avoid double rendering
+      }
+    } catch (err) {
+      console.warn('History fetch failed', err);
+    }
   }
 
   async function pollDeviceData() {
@@ -211,12 +253,184 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // ======================== UI Rendering ========================
+  // ======================== Automations API ========================
+
+  async function fetchAutomations() {
+    try {
+      const res = await fetch(getApiUrl('/api/automation/light'));
+      if (!res.ok) throw new Error('Automation fetch failed');
+      const data = await res.json();
+      
+      document.getElementById('auto-light-enabled').checked = data.enabled;
+      document.getElementById('auto-light-threshold').value = data.threshold;
+      
+      const autoOffToggle = document.getElementById('auto-off-enabled');
+      if (autoOffToggle) autoOffToggle.checked = data.autoOffEnabled || false;
+      
+      const autoOffTimeout = document.getElementById('auto-off-timeout');
+      if (autoOffTimeout) autoOffTimeout.value = data.autoOffTimeoutSeconds || 300;
+      
+      // We need to render the loads checkboxes dynamically based on cachedLoads
+      renderAutomationLoads(data.loadPins || []);
+    } catch (err) {
+      console.warn('Failed to fetch automations', err);
+    }
+  }
+
+  async function fetchClimateAutomation() {
+    try {
+      const res = await fetch(getApiUrl('/api/automation/climate'));
+      if (!res.ok) throw new Error('Climate automation fetch failed');
+      const data = await res.json();
+      
+      document.getElementById('auto-climate-enabled').checked = data.enabled;
+      document.getElementById('auto-climate-target').value = data.targetTemp;
+      
+      const onSelect = document.getElementById('auto-climate-on-slot');
+      if (onSelect && Array.from(onSelect.options).some(o => o.value == data.irSlotPowerOn)) {
+        onSelect.value = data.irSlotPowerOn;
+      }
+      
+      const offSelect = document.getElementById('auto-climate-off-slot');
+      if (offSelect && Array.from(offSelect.options).some(o => o.value == data.irSlotPowerOff)) {
+        offSelect.value = data.irSlotPowerOff;
+      }
+    } catch (err) {
+      console.warn('Failed to fetch climate automation', err);
+    }
+  }
+
+  function renderAutomationLoads(selectedPins) {
+    const container = document.getElementById('auto-light-loads');
+    if (!container) return;
+    
+    container.innerHTML = '';
+    
+    if (!cachedLoads || cachedLoads.length === 0) {
+      container.innerHTML = '<span style="font-size:12px; color:var(--text-secondary);">No loads available</span>';
+      return;
+    }
+    
+    cachedLoads.forEach((load, index) => {
+      const isChecked = selectedPins.includes(load.pin) ? 'checked' : '';
+      container.innerHTML += `
+        <label style="display:flex; align-items:center; gap:8px; cursor:pointer; padding:4px 0;">
+          <input type="checkbox" class="auto-load-checkbox" value="${load.pin}" ${isChecked}>
+          <span style="font-size:14px; color:var(--text-primary);">Load ${index + 1}</span>
+        </label>
+      `;
+    });
+  }
+
+  document.getElementById('btn-save-auto-light')?.addEventListener('click', async () => {
+    const btn = document.getElementById('btn-save-auto-light');
+    btn.textContent = 'Saving...';
+    
+    const enabled = document.getElementById('auto-light-enabled').checked;
+    const threshold = document.getElementById('auto-light-threshold').value;
+    
+    const autoOffEnabled = document.getElementById('auto-off-enabled') ? document.getElementById('auto-off-enabled').checked : false;
+    const autoOffTimeout = document.getElementById('auto-off-timeout') ? document.getElementById('auto-off-timeout').value : 300;
+    
+    const checkboxes = document.querySelectorAll('.auto-load-checkbox:checked');
+    const selectedPins = Array.from(checkboxes).map(cb => cb.value).join(',');
+    
+    const formData = new URLSearchParams();
+    formData.append('enabled', enabled);
+    formData.append('threshold', threshold);
+    formData.append('autoOffEnabled', autoOffEnabled);
+    formData.append('autoOffTimeoutSeconds', autoOffTimeout);
+    formData.append('loadPins', selectedPins);
+    
+    try {
+      const res = await fetch(getApiUrl('/api/automation/light'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: formData.toString()
+      });
+      
+      if (res.ok) {
+        showToast('success', 'Automation Saved', 'Light automation settings applied.');
+      } else {
+        showToast('error', 'Save Failed', 'Device returned an error.');
+      }
+    } catch (err) {
+      console.error('Automation save failed', err);
+      showToast('error', 'Network Error', 'Could not reach the device.');
+    }
+    
+    setTimeout(() => btn.textContent = 'Save Automation', 1000);
+  });
+
+  document.getElementById('btn-save-auto-climate')?.addEventListener('click', async (e) => {
+    const btn = e.target;
+    btn.textContent = 'Saving...';
+    
+    const enabled = document.getElementById('auto-climate-enabled').checked;
+    const targetTemp = document.getElementById('auto-climate-target').value;
+    const irSlotPowerOn = document.getElementById('auto-climate-on-slot').value;
+    const irSlotPowerOff = document.getElementById('auto-climate-off-slot').value;
+
+    const params = new URLSearchParams();
+    params.append('enabled', enabled);
+    params.append('targetTemp', targetTemp);
+    params.append('irSlotPowerOn', irSlotPowerOn);
+    params.append('irSlotPowerOff', irSlotPowerOff);
+
+    try {
+      const res = await fetch(getApiUrl('/api/automation/climate'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: params.toString()
+      });
+      
+      if (res.ok) {
+        showToast('success', 'Thermostat Saved', 'Climate automation settings applied.');
+      } else {
+        showToast('error', 'Save Failed', 'Device returned an error.');
+      }
+    } catch (err) {
+      console.error('Automation save failed', err);
+      showToast('error', 'Network Error', 'Could not reach the device.');
+    }
+    
+    setTimeout(() => btn.textContent = 'Save Thermostat', 1000);
+  });
+
+  // ======================== Rendering Components ========================
+
+  function createSparkline(dataArr, color) {
+    if (!dataArr || dataArr.length < 2) return '';
+    const min = Math.min(...dataArr) * 0.9;
+    const max = Math.max(...dataArr) * 1.1;
+    const range = max - min || 1;
+    const width = 100;
+    const height = 30;
+    
+    let path = `M 0 ${height - ((dataArr[0] - min) / range) * height}`;
+    for (let i = 1; i < dataArr.length; i++) {
+      const x = (i / (dataArr.length - 1)) * width;
+      const y = height - ((dataArr[i] - min) / range) * height;
+      path += ` L ${x} ${y}`;
+    }
+    
+    return `<svg width="100%" height="30" viewBox="0 0 100 30" preserveAspectRatio="none" style="margin-top:8px;">
+      <path d="${path}" fill="none" stroke="${color}" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>
+    </svg>`;
+  }
 
   function renderSensors(sensors) {
     if (!sensors) return;
 
     let html = '';
+
+    // Extract history arrays
+    let tempHist = [], humHist = [], lightHist = [];
+    if (cachedHistory && cachedHistory.points) {
+      tempHist = cachedHistory.points.map(p => p.t);
+      humHist = cachedHistory.points.map(p => p.h);
+      lightHist = cachedHistory.points.map(p => p.l);
+    }
 
     // Climate
     if (sensors.climate) {
@@ -226,11 +440,13 @@ document.addEventListener('DOMContentLoaded', () => {
           <span class="sensor-icon">🌡️</span>
           <span class="sensor-label">Temperature</span>
           <span class="sensor-value" style="color: ${tempColor}">${sensors.climate.temperature.toFixed(1)}°C</span>
+          ${createSparkline(tempHist, tempColor)}
         </div>
         <div class="sensor-card">
           <span class="sensor-icon">💧</span>
           <span class="sensor-label">Humidity</span>
           <span class="sensor-value">${sensors.climate.humidity.toFixed(1)}%</span>
+          ${createSparkline(humHist, '#64b5f6')}
         </div>
       `;
     }
@@ -242,6 +458,7 @@ document.addEventListener('DOMContentLoaded', () => {
           <span class="sensor-icon">${lightIcon}</span>
           <span class="sensor-label">Ambient Light</span>
           <span class="sensor-value">${sensors.light.percentage.toFixed(1)}%</span>
+          ${createSparkline(lightHist, '#ffd54f')}
         </div>
       `;
     }
@@ -481,11 +698,62 @@ document.addEventListener('DOMContentLoaded', () => {
       return acc;
     }, {});
 
+    // Populate datalist for Device IDs
+    const datalist = document.getElementById('ir-device-list');
+    if (datalist) {
+      datalist.innerHTML = Object.keys(grouped)
+        .map(deviceId => `<option value="${deviceId}"></option>`)
+        .join('');
+    }
+
+    // Populate dropdown selector
+    if (irDeviceDropdown) {
+      const devices = ['all', ...Object.keys(grouped)];
+      
+      let html = '';
+      devices.forEach(d => {
+        const label = d === 'all' ? 'All Devices' : d;
+        html += `<div class="dropdown-option" data-value="${d}">${label}</div>`;
+      });
+      irDeviceOptions.innerHTML = html;
+      
+      if (!devices.includes(currentSelectedDevice)) {
+         currentSelectedDevice = 'all';
+      }
+      
+      irDeviceSelected.innerHTML = `${currentSelectedDevice === 'all' ? 'All Devices' : currentSelectedDevice} <span>▼</span>`;
+      irDeviceDropdown.style.display = Object.keys(grouped).length > 0 ? 'block' : 'none';
+
+      // Re-bind clicks on new options
+      irDeviceOptions.querySelectorAll('.dropdown-option').forEach(opt => {
+        opt.addEventListener('click', (e) => {
+          e.stopPropagation();
+          currentSelectedDevice = opt.dataset.value;
+          irDeviceSelected.innerHTML = `${currentSelectedDevice === 'all' ? 'All Devices' : currentSelectedDevice} <span>▼</span>`;
+          irDeviceOptions.classList.remove('open');
+          
+          // trigger filter
+          const groups = document.querySelectorAll('.ir-device-group');
+          groups.forEach(g => {
+            if (currentSelectedDevice === 'all' || g.dataset.deviceId === currentSelectedDevice) {
+              g.style.display = 'block';
+            } else {
+              g.style.display = 'none';
+            }
+          });
+        });
+      });
+    }
+
     irContainer.innerHTML = '';
 
     Object.keys(grouped).forEach(deviceId => {
       const groupDiv = document.createElement('div');
       groupDiv.className = 'ir-device-group';
+      groupDiv.dataset.deviceId = deviceId;
+      if (currentSelectedDevice !== 'all' && currentSelectedDevice !== deviceId) {
+        groupDiv.style.display = 'none';
+      }
 
       const title = document.createElement('h3');
       title.className = 'ir-device-title';
@@ -505,7 +773,7 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
           <div class="ir-actions">
             <button class="ir-btn-emit" data-slot="${cmd.slot}">Emit</button>
-            <button class="ir-btn-edit" data-slot="${cmd.slot}">Edit</button>
+            <button class="ir-btn-edit" data-slot="${cmd.slot}" title="Edit/Re-record">✎</button>
           </div>
         `;
 
@@ -542,6 +810,27 @@ document.addEventListener('DOMContentLoaded', () => {
       groupDiv.appendChild(listDiv);
       irContainer.appendChild(groupDiv);
     });
+
+    // Populate climate automation dropdowns
+    const onSelect = document.getElementById('auto-climate-on-slot');
+    const offSelect = document.getElementById('auto-climate-off-slot');
+    
+    if (onSelect && offSelect) {
+      const onVal = onSelect.value;
+      const offVal = offSelect.value;
+      
+      const optionsHtml = '<option value="-1">-- None --</option>' + 
+        commands.map(cmd => `<option value="${cmd.slot}">${cmd.deviceId} - ${cmd.name} (Slot ${cmd.slot})</option>`).join('');
+      
+      onSelect.innerHTML = optionsHtml;
+      offSelect.innerHTML = optionsHtml;
+      
+      if (Array.from(onSelect.options).some(o => o.value == onVal)) onSelect.value = onVal;
+      if (Array.from(offSelect.options).some(o => o.value == offVal)) offSelect.value = offVal;
+      
+      // Since dropdowns are now populated, we can fetch the climate settings properly
+      fetchClimateAutomation();
+    }
   }
 
   function renderSettings(settings) {

@@ -6,6 +6,9 @@
 #include "PresenceSensor.hpp"
 #include "ClimateSensor.hpp"
 #include "LightSensor.hpp"
+#include "LightAutomation.hpp"
+#include "ClimateAutomation.hpp"
+#include "HistoryBuffer.hpp"
 #include "JsonSerializable.hpp"
 #include "Relay.hpp"
 #include "switch.hpp"
@@ -30,7 +33,10 @@ private:
     PresenceSensor* _presenceSensor;
     ClimateSensor* _climateSensor;
     IRController* _irController;
-    LightSensor* _lightSensor; // Tracker field
+    LightSensor* _lightSensor;
+    LightAutomation* _lightAutomation;
+    ClimateAutomation* _climateAutomation;
+    HistoryBuffer* _historyBuffer;
     Setting* _settings;
     volatile bool _feedbackPending;
 
@@ -47,7 +53,10 @@ public:
     void registerPresenceSensor(PresenceSensor& sensorInstance);
     void registerClimateSensor(ClimateSensor& sensorInstance);
     void registerIRController(IRController& irInstance);
-    void registerLightSensor(LightSensor& sensorInstance); // Registration method
+    void registerLightSensor(LightSensor& sensorInstance);
+    void registerLightAutomation(LightAutomation& automationInstance);
+    void registerClimateAutomation(ClimateAutomation& automationInstance);
+    void registerHistoryBuffer(HistoryBuffer& historyInstance);
     void registerSetting(Setting& settingInstance);
     void registerSettings(Setting& settingInstance);
 
@@ -57,7 +66,10 @@ public:
     PresenceSensor* getPresenceSensor() const;
     ClimateSensor* getClimateSensor() const;
     IRController* getIRController() const;
-    LightSensor* getLightSensor() const; // Getter
+    LightSensor* getLightSensor() const;
+    LightAutomation* getLightAutomation() const;
+    ClimateAutomation* getClimateAutomation() const;
+    HistoryBuffer* getHistoryBuffer() const;
     Setting* getSetting() const;
     Setting* getSettings() const;
     Switch* findSwitchByPin(uint8_t pin) const;
@@ -89,6 +101,9 @@ inline Room::Room() :
     _climateSensor(nullptr),
     _irController(nullptr),
     _lightSensor(nullptr),
+    _lightAutomation(nullptr),
+    _climateAutomation(nullptr),
+    _historyBuffer(nullptr),
     _settings(nullptr),
     _feedbackPending(false)
 {
@@ -135,6 +150,21 @@ inline void Room::registerLightSensor(LightSensor& sensorInstance) {
     sysQueue.push(new Firmware::LoggingTask(Firmware::LogLevel::DEBUG, "ROOM", String("Registered light sensor pin=") + sensorInstance.getRawValue()));
 }
 
+inline void Room::registerLightAutomation(LightAutomation& automationInstance) {
+    _lightAutomation = &automationInstance;
+    sysQueue.push(new Firmware::LoggingTask(Firmware::LogLevel::DEBUG, "ROOM", "Registered light automation"));
+}
+
+inline void Room::registerClimateAutomation(ClimateAutomation& automationInstance) {
+    _climateAutomation = &automationInstance;
+    sysQueue.push(new Firmware::LoggingTask(Firmware::LogLevel::DEBUG, "ROOM", "Registered climate automation"));
+}
+
+inline void Room::registerHistoryBuffer(HistoryBuffer& historyInstance) {
+    _historyBuffer = &historyInstance;
+    sysQueue.push(new Firmware::LoggingTask(Firmware::LogLevel::DEBUG, "ROOM", "Registered history buffer"));
+}
+
 inline void Room::registerSetting(Setting& settingInstance) {
     _settings = &settingInstance;
     sysQueue.push(new Firmware::LoggingTask(Firmware::LogLevel::DEBUG, "ROOM", String("Registered setting")));
@@ -151,6 +181,9 @@ inline PresenceSensor* Room::getPresenceSensor() const { return _presenceSensor;
 inline ClimateSensor* Room::getClimateSensor() const { return _climateSensor; }
 inline IRController* Room::getIRController() const { return _irController; }
 inline LightSensor* Room::getLightSensor() const { return _lightSensor; }
+inline LightAutomation* Room::getLightAutomation() const { return _lightAutomation; }
+inline ClimateAutomation* Room::getClimateAutomation() const { return _climateAutomation; }
+inline HistoryBuffer* Room::getHistoryBuffer() const { return _historyBuffer; }
 inline Setting* Room::getSetting() const { return _settings; }
 inline Setting* Room::getSettings() const { return _settings; }
 
@@ -208,6 +241,124 @@ inline String Room::toJson() {
     }
     json += "}";
     return json;
+}
+
+inline void LightAutomation::evaluate(float currentLightPercentage, Room& room) {
+    static unsigned long lastLog = 0;
+    if (millis() - lastLog > 10000) {
+        lastLog = millis();
+        sysQueue.push(new Firmware::LoggingTask(Firmware::LogLevel::DEBUG, "AUTO", String("Eval: en=") + _enabled + " light=" + currentLightPercentage + " thresh=" + _threshold + " trig=" + _triggered));
+    }
+
+    if (!_enabled) {
+        _triggered = false;
+        return;
+    }
+
+    bool roomEmpty = false;
+
+    // Presence & Auto-Off Logic
+    PresenceSensor* presence = room.getPresenceSensor();
+    if (presence != nullptr) {
+        if (presence->isMotionDetected()) {
+            _lastMotionTime = millis();
+        } else {
+            if (millis() - _lastMotionTime > (_autoOffTimeoutSeconds * 1000UL)) {
+                roomEmpty = true;
+                
+                if (_autoOffEnabled) {
+                    bool anyTurnedOff = false;
+                    for (uint8_t pin : _loadPins) {
+                        Relay* relay = room.findRelayByPin(pin);
+                        if (relay != nullptr && relay->isOn()) {
+                            relay->turnOff();
+                            anyTurnedOff = true;
+                            sysQueue.push(new Firmware::LoggingTask(Firmware::LogLevel::INFO, "AUTO", String("Auto-off: Turned OFF load pin ") + pin));
+                        }
+                    }
+                    if (anyTurnedOff) {
+                        _lastMotionTime = millis(); // Prevent spamming turnOff
+                    }
+                }
+                
+                // Reset trigger so it can work again on next entry
+                if (_triggered) {
+                    _triggered = false;
+                    sysQueue.push(new Firmware::LoggingTask(Firmware::LogLevel::INFO, "AUTO", "Automation reset due to empty room"));
+                }
+            }
+        }
+    }
+
+    // Trigger logic
+    if (currentLightPercentage <= _threshold) {
+        if (!_triggered) {
+            // Only trigger if we don't know the room is empty
+            if (!roomEmpty) {
+                _triggered = true;
+                sysQueue.push(new Firmware::LoggingTask(Firmware::LogLevel::INFO, "AUTO", String("Light Automation Triggered! Light: ") + currentLightPercentage + " <= " + _threshold));
+                
+                for (uint8_t pin : _loadPins) {
+                    Relay* relay = room.findRelayByPin(pin);
+                    if (relay != nullptr) {
+                        relay->turnOn();
+                        sysQueue.push(new Firmware::LoggingTask(Firmware::LogLevel::INFO, "AUTO", String("Turned ON load pin ") + pin));
+                    }
+                }
+            }
+        }
+    } 
+    // Hysteresis reset logic
+    else if (currentLightPercentage > (_threshold + 1.0f)) {
+        // Only reset based on high light level if the loads are actually OFF.
+        // If the loads are ON, the high light might be artificial, so we shouldn't reset.
+        bool anyLoadOn = false;
+        for (uint8_t pin : _loadPins) {
+            Relay* relay = room.findRelayByPin(pin);
+            if (relay != nullptr && relay->isOn()) {
+                anyLoadOn = true;
+                break;
+            }
+        }
+
+        if (!anyLoadOn && _triggered) {
+            _triggered = false;
+            sysQueue.push(new Firmware::LoggingTask(Firmware::LogLevel::INFO, "AUTO", String("Light Automation Reset. Natural light high: ") + currentLightPercentage));
+        }
+    }
+}
+
+inline void ClimateAutomation::evaluate(float currentTemp, Room& room) {
+    if (!_enabled) {
+        _triggered = false;
+        return;
+    }
+
+    if (isnan(currentTemp)) return;
+
+    if (currentTemp >= _targetTemp) {
+        if (!_triggered) {
+            _triggered = true;
+            if (_irSlotPowerOn >= 0) {
+                IRController* ir = room.getIRController();
+                if (ir != nullptr) {
+                    ir->transmitSlot(_irSlotPowerOn);
+                    sysQueue.push(new Firmware::LoggingTask(Firmware::LogLevel::INFO, "AUTO", String("Climate Auto: Temp ") + currentTemp + " >= " + _targetTemp + ". Emitted ON command."));
+                }
+            }
+        }
+    } else if (currentTemp <= (_targetTemp - 1.0f)) { // 1 degree hysteresis
+        if (_triggered) {
+            _triggered = false;
+            if (_irSlotPowerOff >= 0) {
+                IRController* ir = room.getIRController();
+                if (ir != nullptr) {
+                    ir->transmitSlot(_irSlotPowerOff);
+                    sysQueue.push(new Firmware::LoggingTask(Firmware::LogLevel::INFO, "AUTO", String("Climate Auto: Temp ") + currentTemp + " <= " + (_targetTemp - 1.0f) + ". Emitted OFF command."));
+                }
+            }
+        }
+    }
 }
 
 #endif
