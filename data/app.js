@@ -59,6 +59,14 @@ document.addEventListener('DOMContentLoaded', () => {
   const loadCountBadge = document.getElementById('load-count-badge');
   const settingsStatusBadge = document.getElementById('settings-status-badge');
 
+  const scenesContainer = document.getElementById('scenes-container');
+  const btnAddScene = document.getElementById('btn-add-scene');
+  const sceneModal = document.getElementById('scene-modal');
+  const closeSceneModalBtn = document.getElementById('btn-close-scene-modal');
+  const sceneForm = document.getElementById('scene-form');
+  const inputSceneName = document.getElementById('input-scene-name');
+  const sceneLoadsContainer = document.getElementById('scene-loads-container');
+
   const irDeviceDropdown = document.getElementById('ir-device-dropdown');
   const irDeviceSelected = document.getElementById('ir-device-selected');
   const irDeviceOptions = document.getElementById('ir-device-options');
@@ -163,6 +171,11 @@ document.addEventListener('DOMContentLoaded', () => {
     renderLoads(data.loads);
     if (data.controllers && data.controllers.ir) {
       renderIRCommands(data.controllers.ir.commands);
+    }
+    
+    // Scenes
+    if (data.scenes) {
+      renderScenes(data.scenes);
     }
 
     // Cache loads for the load-attach modal
@@ -651,6 +664,95 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  function renderScenes(scenes) {
+    if (!scenes || scenes.length === 0) {
+      scenesContainer.innerHTML = '<div class="ir-empty-state">No scenes created yet.</div>';
+      return;
+    }
+
+    const scenesJson = JSON.stringify(scenes);
+    if (scenesContainer.dataset.lastJson === scenesJson) return;
+    scenesContainer.dataset.lastJson = scenesJson;
+
+    scenesContainer.innerHTML = '';
+    scenes.forEach(scene => {
+      const div = document.createElement('div');
+      div.className = 'scene-card';
+      
+      let actionsSummary = '';
+      if (scene.actions.length === 0) {
+        actionsSummary = 'No loads configured';
+      } else {
+        const onCount = scene.actions.filter(a => a.state).length;
+        const offCount = scene.actions.filter(a => !a.state).length;
+        if (onCount > 0) actionsSummary += `${onCount} ON`;
+        if (onCount > 0 && offCount > 0) actionsSummary += ', ';
+        if (offCount > 0) actionsSummary += `${offCount} OFF`;
+      }
+
+      div.innerHTML = `
+        <div class="scene-header">
+          <h3>${scene.name}</h3>
+          <span class="scene-id">ID: ${scene.id}</span>
+        </div>
+        <div class="scene-meta">
+          <span class="scene-summary">${actionsSummary}</span>
+        </div>
+        <div class="scene-actions" style="display:flex; gap:10px; margin-top:16px;">
+          <button class="btn btn-primary scene-exec-btn" data-id="${scene.id}" style="flex:1;">▶ Execute</button>
+          <button class="btn btn-danger scene-del-btn" data-id="${scene.id}" style="padding:8px; display:flex; align-items:center; justify-content:center;" title="Delete Scene">
+            <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+          </button>
+        </div>
+      `;
+
+      scenesContainer.appendChild(div);
+    });
+
+    document.querySelectorAll('.scene-exec-btn').forEach(el => {
+      el.addEventListener('click', async (e) => {
+        const id = e.target.dataset.id;
+        const btn = e.target;
+        btn.textContent = '...';
+
+        try {
+          const res = await fetch(getApiUrl(`/api/scenes/execute?id=${id}`), { method: 'POST' });
+          if (res.ok) {
+            showToast('success', 'Scene Executed', `Fired scene ID ${id}.`);
+          } else {
+            showToast('error', 'Execution Failed', 'Device returned an error.');
+          }
+          setTimeout(() => { if (e.target) e.target.textContent = '▶ Execute'; }, 400);
+          pollDeviceData();
+        } catch (err) {
+          console.error('Scene execution failed', err);
+          if (e.target) e.target.textContent = '▶ Execute';
+          showToast('error', 'Network Error', 'Could not reach the device.');
+        }
+      });
+    });
+
+    document.querySelectorAll('.scene-del-btn').forEach(el => {
+      el.addEventListener('click', async (e) => {
+        const id = e.currentTarget.dataset.id;
+        if (!confirm(`Are you sure you want to delete Scene ID ${id}?`)) return;
+
+        try {
+          const res = await fetch(getApiUrl(`/api/scenes?id=${id}`), { method: 'DELETE' });
+          if (res.ok) {
+            showToast('success', 'Scene Deleted', `Removed scene ID ${id}.`);
+            pollDeviceData();
+          } else {
+            showToast('error', 'Deletion Failed', 'Device returned an error.');
+          }
+        } catch (err) {
+          console.error('Scene deletion failed', err);
+          showToast('error', 'Network Error', 'Could not reach the device.');
+        }
+      });
+    });
+  }
+
   function renderIRCommands(commands) {
     if (!commands || commands.length === 0) {
       irContainer.innerHTML = '<div class="ir-empty-state">No IR commands recorded yet.</div>';
@@ -722,7 +824,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       
       irDeviceSelected.innerHTML = `${currentSelectedDevice === 'all' ? 'All Devices' : currentSelectedDevice} <span>▼</span>`;
-      irDeviceDropdown.style.display = Object.keys(grouped).length > 0 ? 'block' : 'none';
+      document.getElementById('ir-device-dropdown').style.display = Object.keys(grouped).length > 0 ? 'block' : 'none';
 
       // Re-bind clicks on new options
       irDeviceOptions.querySelectorAll('.dropdown-option').forEach(opt => {
@@ -1042,8 +1144,79 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  // Scene Modal
+  btnAddScene?.addEventListener('click', () => {
+    inputSceneName.value = '';
+    
+    if (!cachedLoads || cachedLoads.length === 0) {
+      sceneLoadsContainer.innerHTML = '<span style="font-size:12px; color:var(--text-secondary);">No loads available to control.</span>';
+    } else {
+      let html = '';
+      cachedLoads.forEach((load, i) => {
+        html += `
+          <div class="scene-load-item">
+            <span style="font-size:13px; font-weight:600;">Load ${i+1} <span style="font-size:10px; color:var(--text-secondary); font-weight:normal;">(Pin ${load.pin})</span></span>
+            <select class="scene-load-select" data-pin="${load.pin}">
+              <option value="ignore" selected>Ignore</option>
+              <option value="1">Turn ON</option>
+              <option value="0">Turn OFF</option>
+            </select>
+          </div>
+        `;
+      });
+      sceneLoadsContainer.innerHTML = html;
+    }
+    
+    sceneModal.classList.add('active');
+  });
+
+  closeSceneModalBtn?.addEventListener('click', () => {
+    sceneModal.classList.remove('active');
+  });
+
+  sceneForm?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name = inputSceneName.value.trim();
+    
+    // Gather actions
+    const selects = sceneLoadsContainer.querySelectorAll('.scene-load-select');
+    const actions = [];
+    selects.forEach(sel => {
+      if (sel.value !== 'ignore') {
+        actions.push(`${sel.dataset.pin}:${sel.value}`);
+      }
+    });
+    
+    const actionsStr = actions.join(',');
+    
+    const submitBtn = document.getElementById('btn-submit-scene');
+    submitBtn.textContent = 'Saving...';
+    submitBtn.disabled = true;
+
+    try {
+      const res = await fetch(getApiUrl(`/api/scenes?name=${encodeURIComponent(name)}&actions=${encodeURIComponent(actionsStr)}`), {
+        method: 'POST'
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        showToast('success', 'Scene Created', data.message || 'Scene saved.');
+        sceneModal.classList.remove('active');
+        pollDeviceData(); // Refresh UI
+      } else {
+        showToast('error', 'Save Failed', data.error || 'Server error');
+      }
+    } catch (err) {
+      console.error(err);
+      showToast('error', 'Network Error', 'Could not save scene.');
+    } finally {
+      submitBtn.textContent = 'Save Scene';
+      submitBtn.disabled = false;
+    }
+  });
+
   // Close modals on overlay click
-  [configModal, irModal, loadModal].forEach(modal => {
+  [configModal, irModal, loadModal, sceneModal].forEach(modal => {
+    if (!modal) return;
     modal.addEventListener('click', (e) => {
       if (e.target === modal) modal.classList.remove('active');
     });
@@ -1052,9 +1225,10 @@ document.addEventListener('DOMContentLoaded', () => {
   // Close modals on Escape key
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-      configModal.classList.remove('active');
-      irModal.classList.remove('active');
-      loadModal.classList.remove('active');
+      configModal?.classList.remove('active');
+      irModal?.classList.remove('active');
+      loadModal?.classList.remove('active');
+      sceneModal?.classList.remove('active');
     }
   });
 

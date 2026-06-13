@@ -20,6 +20,7 @@
 #include "switch.hpp"
 #include "LightAutomation.hpp"
 #include "ClimateAutomation.hpp"
+#include "SceneManager.hpp"
 #include "ClimateSensor.hpp"
 #include "PresenceSensor.hpp"
 #include "IRController.hpp"
@@ -111,6 +112,7 @@ LightSensor lightSensor(LIGHT_SENSOR_PIN);
 LightAutomation lightAutomation("light_auto", globalStorage);
 ClimateAutomation climateAutomation("climate_auto", globalStorage);
 HistoryBuffer historyBuffer;
+SceneManager sceneManager("scenes", globalStorage);
 Setting roomSettings("room_settings", &globalStorage);
 
 void setup() {
@@ -132,6 +134,7 @@ void setup() {
     irController.load(globalStorage.prefs());
     lightAutomation.begin();
     climateAutomation.begin();
+    sceneManager.begin();
     
     HardwareManager& hw = HardwareManager::getInstance();
     Serial.println( "Starting I2C hardware manager");
@@ -158,6 +161,7 @@ void setup() {
     room.registerLightAutomation(lightAutomation);
     room.registerClimateAutomation(climateAutomation);
     room.registerHistoryBuffer(historyBuffer);
+    room.registerSceneManager(sceneManager);
     room.registerIRController(irController);
     room.registerSetting(roomSettings);
 

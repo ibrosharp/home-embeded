@@ -39,6 +39,9 @@ public:
     // Inverts the current state of the relay
     void toggle();
 
+    // Enforce a minimum delay between any relay turning ON globally
+    void applyStaggerDelay();
+
     // Returns true if the relay is currently ON
     bool isOn() const;
 
@@ -82,6 +85,9 @@ void Relay::begin() {
 
     // 2. Set the pin output value in MCP23X17 register before configuring as OUTPUT
     // This ensures it transitions directly to the correct state when enabled
+    if (_state) {
+        applyStaggerDelay();
+    }
     uint8_t pinValue = _state ? (_isActiveLow ? LOW : HIGH) : (_isActiveLow ? HIGH : LOW);
     _hardwareManager->writePin(_pin, pinValue);
 
@@ -90,7 +96,19 @@ void Relay::begin() {
     sysQueue.push(new Firmware::LoggingTask(Firmware::LogLevel::INFO, "RELAY", String("Relay applied state=") + (_state ? "ON" : "OFF") + " on pin=" + _pin));
 }
 
+void Relay::applyStaggerDelay() {
+    static unsigned long s_lastRelayOnTime = 0;
+    unsigned long now = millis();
+    if (now < s_lastRelayOnTime) s_lastRelayOnTime = now; // Handle rollover
+    unsigned long diff = now - s_lastRelayOnTime;
+    if (diff < 400) {
+        vTaskDelay(pdMS_TO_TICKS(400 - diff));
+    }
+    s_lastRelayOnTime = millis();
+}
+
 void Relay::turnOn() {
+    applyStaggerDelay();
     _state = true;
     uint8_t pinValue = _isActiveLow ? LOW : HIGH;
     _hardwareManager->writePin(_pin, pinValue);

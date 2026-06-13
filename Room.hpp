@@ -13,6 +13,7 @@
 #include "Relay.hpp"
 #include "switch.hpp"
 #include "Setting.hpp"
+#include "SceneManager.hpp"
 #include "LoggingTask.hpp"
 #include "TaskQueueManager.hpp"
 
@@ -37,6 +38,7 @@ private:
     LightAutomation* _lightAutomation;
     ClimateAutomation* _climateAutomation;
     HistoryBuffer* _historyBuffer;
+    SceneManager* _sceneManager;
     Setting* _settings;
     volatile bool _feedbackPending;
 
@@ -57,6 +59,7 @@ public:
     void registerLightAutomation(LightAutomation& automationInstance);
     void registerClimateAutomation(ClimateAutomation& automationInstance);
     void registerHistoryBuffer(HistoryBuffer& historyInstance);
+    void registerSceneManager(SceneManager& sceneManagerInstance);
     void registerSetting(Setting& settingInstance);
     void registerSettings(Setting& settingInstance);
 
@@ -70,6 +73,7 @@ public:
     LightAutomation* getLightAutomation() const;
     ClimateAutomation* getClimateAutomation() const;
     HistoryBuffer* getHistoryBuffer() const;
+    SceneManager* getSceneManager() const;
     Setting* getSetting() const;
     Setting* getSettings() const;
     Switch* findSwitchByPin(uint8_t pin) const;
@@ -104,6 +108,7 @@ inline Room::Room() :
     _lightAutomation(nullptr),
     _climateAutomation(nullptr),
     _historyBuffer(nullptr),
+    _sceneManager(nullptr),
     _settings(nullptr),
     _feedbackPending(false)
 {
@@ -165,6 +170,11 @@ inline void Room::registerHistoryBuffer(HistoryBuffer& historyInstance) {
     sysQueue.push(new Firmware::LoggingTask(Firmware::LogLevel::DEBUG, "ROOM", "Registered history buffer"));
 }
 
+inline void Room::registerSceneManager(SceneManager& sceneManagerInstance) {
+    _sceneManager = &sceneManagerInstance;
+    sysQueue.push(new Firmware::LoggingTask(Firmware::LogLevel::DEBUG, "ROOM", "Registered scene manager"));
+}
+
 inline void Room::registerSetting(Setting& settingInstance) {
     _settings = &settingInstance;
     sysQueue.push(new Firmware::LoggingTask(Firmware::LogLevel::DEBUG, "ROOM", String("Registered setting")));
@@ -184,6 +194,7 @@ inline LightSensor* Room::getLightSensor() const { return _lightSensor; }
 inline LightAutomation* Room::getLightAutomation() const { return _lightAutomation; }
 inline ClimateAutomation* Room::getClimateAutomation() const { return _climateAutomation; }
 inline HistoryBuffer* Room::getHistoryBuffer() const { return _historyBuffer; }
+inline SceneManager* Room::getSceneManager() const { return _sceneManager; }
 inline Setting* Room::getSetting() const { return _settings; }
 inline Setting* Room::getSettings() const { return _settings; }
 
@@ -238,6 +249,9 @@ inline String Room::toJson() {
     json += "}";
     if (_settings != nullptr) {
         json += ",\"settings\":" + _settings->toJson();
+    }
+    if (_sceneManager != nullptr) {
+        json += ",\"scenes\":" + _sceneManager->toJson();
     }
     json += "}";
     return json;
@@ -359,6 +373,23 @@ inline void ClimateAutomation::evaluate(float currentTemp, Room& room) {
             }
         }
     }
+}
+
+inline bool SceneManager::executeScene(uint8_t id, Room& room) {
+    for (size_t i = 0; i < _scenes.size(); i++) {
+        if (_scenes[i].id == id) {
+            sysQueue.push(new Firmware::LoggingTask(Firmware::LogLevel::INFO, "SCENE", String("Executing scene: ") + _scenes[i].name));
+            for (const auto& action : _scenes[i].actions) {
+                Relay* relay = room.findRelayByPin(action.pin);
+                if (relay) {
+                    if (action.state) relay->turnOn();
+                    else relay->turnOff();
+                }
+            }
+            return true;
+        }
+    }
+    return false;
 }
 
 #endif

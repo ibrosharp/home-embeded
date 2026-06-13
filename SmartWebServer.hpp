@@ -64,6 +64,11 @@ private:
     void handleClimateAutomation(AsyncWebServerRequest *request);
     void handleUpdateClimateAutomation(AsyncWebServerRequest *request);
     
+    // Scenes
+    void handleCreateScene(AsyncWebServerRequest *request);
+    void handleDeleteScene(AsyncWebServerRequest *request);
+    void handleExecuteScene(AsyncWebServerRequest *request);
+    
     // History
     void handleHistory(AsyncWebServerRequest *request);
     
@@ -126,6 +131,11 @@ void SmartWebServer::begin(ServerMode mode) {
     _server.on("/api/automation/climate", HTTP_GET, [this](AsyncWebServerRequest *request) { REQUIRE_AUTH; this->handleClimateAutomation(request); });
     _server.on("/api/automation/climate", HTTP_POST, [this](AsyncWebServerRequest *request) { REQUIRE_AUTH; this->handleUpdateClimateAutomation(request); });
     _server.on("/api/history", HTTP_GET, [this](AsyncWebServerRequest *request) { REQUIRE_AUTH; this->handleHistory(request); });
+    
+    // Scenes
+    _server.on("/api/scenes/execute", HTTP_POST, [this](AsyncWebServerRequest *request) { REQUIRE_AUTH; this->handleExecuteScene(request); });
+    _server.on("/api/scenes", HTTP_POST, [this](AsyncWebServerRequest *request) { REQUIRE_AUTH; this->handleCreateScene(request); });
+    _server.on("/api/scenes", HTTP_DELETE, [this](AsyncWebServerRequest *request) { REQUIRE_AUTH; this->handleDeleteScene(request); });
     
     // OTA Routes
     _server.on("/update", HTTP_GET, [this](AsyncWebServerRequest *request) { REQUIRE_AUTH; this->handleUpdateGet(request); });
@@ -196,6 +206,91 @@ void SmartWebServer::handleSaveConfig(AsyncWebServerRequest *request) {
 void SmartWebServer::handleNotFound(AsyncWebServerRequest *request) {
     String json = "{\"error\":\"Resource not found\",\"code\":404}";
     request->send(404, "application/json", json);
+}
+
+// =================== SCENES ===================
+void SmartWebServer::handleCreateScene(AsyncWebServerRequest *request) {
+    if (!hasArg(request, "name") || !hasArg(request, "actions")) {
+        request->send(400, "application/json", "{\"success\":false,\"error\":\"Missing parameters\"}");
+        return;
+    }
+    
+    String name = getArg(request, "name");
+    String actionsStr = getArg(request, "actions"); // e.g. "12:1,14:0"
+    
+    std::vector<SceneAction> actions;
+    if (actionsStr.length() > 0) {
+        int startIndex = 0;
+        int commaIndex = actionsStr.indexOf(',');
+        while (commaIndex != -1) {
+            String pair = actionsStr.substring(startIndex, commaIndex);
+            int colonIndex = pair.indexOf(':');
+            if (colonIndex != -1) {
+                actions.push_back({(uint8_t)pair.substring(0, colonIndex).toInt(), pair.substring(colonIndex + 1).toInt() > 0});
+            }
+            startIndex = commaIndex + 1;
+            commaIndex = actionsStr.indexOf(',', startIndex);
+        }
+        if (startIndex < actionsStr.length()) {
+            String pair = actionsStr.substring(startIndex);
+            int colonIndex = pair.indexOf(':');
+            if (colonIndex != -1) {
+                actions.push_back({(uint8_t)pair.substring(0, colonIndex).toInt(), pair.substring(colonIndex + 1).toInt() > 0});
+            }
+        }
+    }
+    
+    Room& room = Room::getInstance();
+    SceneManager* sm = room.getSceneManager();
+    if (sm) {
+        if (sm->addScene(name, actions)) {
+            request->send(200, "application/json", "{\"success\":true,\"message\":\"Scene created\"}");
+        } else {
+            request->send(500, "application/json", "{\"success\":false,\"error\":\"Could not create scene (limit reached?)\"}");
+        }
+    } else {
+        request->send(500, "application/json", "{\"success\":false,\"error\":\"SceneManager not found\"}");
+    }
+}
+
+void SmartWebServer::handleDeleteScene(AsyncWebServerRequest *request) {
+    if (!hasArg(request, "id")) {
+        request->send(400, "application/json", "{\"success\":false,\"error\":\"Missing id\"}");
+        return;
+    }
+    
+    uint8_t id = getArg(request, "id").toInt();
+    Room& room = Room::getInstance();
+    SceneManager* sm = room.getSceneManager();
+    if (sm) {
+        if (sm->deleteScene(id)) {
+            request->send(200, "application/json", "{\"success\":true,\"message\":\"Scene deleted\"}");
+        } else {
+            request->send(404, "application/json", "{\"success\":false,\"error\":\"Scene not found\"}");
+        }
+    } else {
+        request->send(500, "application/json", "{\"success\":false,\"error\":\"SceneManager not found\"}");
+    }
+}
+
+void SmartWebServer::handleExecuteScene(AsyncWebServerRequest *request) {
+    if (!hasArg(request, "id")) {
+        request->send(400, "application/json", "{\"success\":false,\"error\":\"Missing id\"}");
+        return;
+    }
+    
+    uint8_t id = getArg(request, "id").toInt();
+    Room& room = Room::getInstance();
+    SceneManager* sm = room.getSceneManager();
+    if (sm) {
+        if (sm->executeScene(id, room)) {
+            request->send(200, "application/json", "{\"success\":true,\"message\":\"Scene executed\"}");
+        } else {
+            request->send(404, "application/json", "{\"success\":false,\"error\":\"Scene not found\"}");
+        }
+    } else {
+        request->send(500, "application/json", "{\"success\":false,\"error\":\"SceneManager not found\"}");
+    }
 }
 
 // GET /api/ir/commands
