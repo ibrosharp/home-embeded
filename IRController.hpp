@@ -5,7 +5,7 @@
 #include <IRremote.h>
 #include "JsonSerializable.hpp"
 
-const int MAX_IR_COMMANDS = 16;
+const int MAX_IR_COMMANDS = 60;
 
 struct IRCommand {
     decode_type_t protocol = UNKNOWN;
