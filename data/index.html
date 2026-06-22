@@ -55,148 +55,136 @@
 </div>
 </div>
 <main class="dashboard-main">
-<section class="sensors-panel" id="sensors-container">
-</section>
-<div class="hardware-grid-layout">
-<div class="hardware-left-col">
-<section class="switches-section">
-<div class="section-title-bar">
-<h2>Hardware Switches</h2>
-<span class="section-badge" id="switch-count-badge">0 Configured</span>
-</div>
-<div class="switches-grid" id="switches-container">
-</div>
-</section>
-<section class="loads-section" id="loads-section" style="margin-top: 24px;">
-<div class="section-title-bar">
-<h2>Loads</h2>
-<span class="section-badge" id="load-count-badge">0 Registered</span>
-</div>
-<div class="loads-grid" id="loads-container">
-</div>
-</section>
-</div>
-<section class="remote-section">
-<div class="section-title-bar">
-<h2>IR Remote</h2>
-<button id="btn-open-remote" class="btn btn-secondary" style="font-size:11px; padding:4px 8px;">Open Remote</button>
-</div>
-<div class="remote-card" style="padding: 16px; text-align: center; color: var(--text-secondary); font-size: 13px;">
-<p>Click Open Remote to control your IR devices.</p>
-</div>
-</section>
-</div>
-<section class="scenes-section" id="scenes-section" style="margin-top: 24px;">
-<div class="section-title-bar">
-<h2>Scenes</h2>
-<button id="btn-add-scene" class="btn btn-secondary admin-only" style="font-size:11px; padding:4px 8px;">+ Create Scene</button>
-</div>
-<div class="scenes-grid" id="scenes-container">
-</div>
-</section>
-<section class="automation-section admin-only" id="automation-section" style="margin-top: 24px;">
-<div class="section-title-bar">
-<h2>Automations</h2>
-</div>
-<div class="settings-grid" id="automation-container">
-<div class="setting-card">
-<div style="display:flex; justify-content:space-between; width:100%; align-items:center;">
-<span class="setting-label">Light Automation</span>
-<label class="toggle-switch">
-<input type="checkbox" id="auto-light-enabled">
-<span class="toggle-slider">
-</span>
-</label>
-</div>
-<div class="setting-card-header" style="flex-direction: column; align-items: flex-start; gap: 8px; width: 100%;">
-<span class="setting-value" style="font-size: 13px; color: var(--text-secondary); font-weight: normal;">Automatically turn on selected loads when the ambient light drops below the threshold.</span>
-<label style="font-size:13px; margin-top:8px;">Threshold %:</label>
-<input type="number" id="auto-light-threshold" step="0.1" min="0" max="100" style="width:100%; padding:8px; border-radius:6px; border:1px solid #333; background:var(--bg-secondary); color:white;">
-<div style="display:flex; justify-content:space-between; width:100%; align-items:center; margin-top:16px;">
-<span class="setting-label">Turn off when empty</span>
-<label class="toggle-switch">
-<input type="checkbox" id="auto-off-enabled">
-<span class="toggle-slider">
-</span>
-</label>
-</div>
-<label style="font-size:13px; margin-top:8px;">Timeout (Seconds):</label>
-<input type="number" id="auto-off-timeout" min="10" max="3600" value="300" style="width:100%; padding:8px; border-radius:6px; border:1px solid #333; background:var(--bg-secondary); color:white;">
-<label style="font-size:13px; margin-top:16px;">Trigger Loads:</label>
-<div id="auto-light-loads" style="display:flex; flex-direction:column; gap:6px; width:100%;">
-</div>
-<div class="setting-actions" style="margin-top: 12px; width: 100%;">
-<button class="action-btn small btn-primary" id="btn-save-auto-light" style="width: 100%;">Save Automation</button>
-</div>
-</div>
-</div>
-<div class="setting-card">
-<div style="display:flex; justify-content:space-between; width:100%; align-items:center;">
-<span class="setting-label">Smart Climate Thermostat</span>
-<label class="toggle-switch">
-<input type="checkbox" id="auto-climate-enabled">
-<span class="toggle-slider">
-</span>
-</label>
-</div>
-<div class="setting-card-header" style="flex-direction: column; align-items: flex-start; gap: 8px; width: 100%;">
-<span class="setting-value" style="font-size: 13px; color: var(--text-secondary); font-weight: normal;">Automatically trigger IR commands when the room temperature crosses the target.</span>
-<label style="font-size:13px; margin-top:8px;">Target Temperature &deg;C:</label>
-<input type="number" id="auto-climate-target" step="0.5" min="16" max="35" style="width:100%; padding:8px; border-radius:6px; border:1px solid #333; background:var(--bg-secondary); color:white;">
-<label style="font-size:13px; margin-top:16px;">AC Power ON Command:</label>
-<select id="auto-climate-on-slot" style="width:100%; padding:8px; border-radius:6px; border:1px solid #333; background:var(--bg-secondary); color:white;">
-<option value="-1">-- None --</option>
-</select>
-<label style="font-size:13px; margin-top:8px;">AC Power OFF Command:</label>
-<select id="auto-climate-off-slot" style="width:100%; padding:8px; border-radius:6px; border:1px solid #333; background:var(--bg-secondary); color:white;">
-<option value="-1">-- None --</option>
-</select>
-<div class="setting-actions" style="margin-top: 12px; width: 100%;">
-<button class="action-btn small btn-primary" id="btn-save-auto-climate" style="width: 100%;">Save Thermostat</button>
-</div>
-</div>
-</div>
-</div>
-</section>
-<section class="settings-section admin-only" id="settings-section">
-<div class="section-title-bar">
-<h2>Device Settings</h2>
-<span class="section-badge" id="settings-status-badge">Loading...</span>
-</div>
-<div class="settings-grid" id="settings-container">
-</div>
-<div class="section-title-bar" style="margin-top: 24px;">
-<h2>System Maintenance</h2>
-</div>
-<div class="settings-grid">
-<div class="setting-card">
-<span class="setting-label">Firmware Update (OTA)</span>
-<div class="setting-card-header" style="flex-direction: column; align-items: flex-start; gap: 8px;">
-<span class="setting-value" style="font-size: 13px; color: var(--text-secondary); font-weight: normal;"> Upload a compiled <code>.bin</code> firmware file to flash the device wirelessly. </span>
-<input type="file" id="input-ota-file" accept=".bin" style="display: none;">
-<div class="setting-actions" style="margin-top: 8px; width: 100%; display: flex; gap: 8px;">
-<button class="action-btn small" id="btn-select-ota" style="flex: 1;">Select .bin</button>
-<button class="action-btn small btn-primary" id="btn-upload-ota" style="flex: 1;" disabled>Upload & Flash</button>
-</div>
-<span id="ota-file-name" style="font-size: 11px; color: var(--accent-primary); word-break: break-all;">
-</span>
-</div>
-<div class="setting-card">
-<span class="setting-label">Accent Color</span>
-<div class="setting-card-header" style="flex-direction: column; align-items: flex-start; gap: 8px;">
-<span class="setting-value" style="font-size: 13px; color: var(--text-secondary); font-weight: normal;"> Choose a personalized theme color for the dashboard. </span>
-<div style="display: flex; gap: 8px; margin-top: 8px;">
-  <div class="color-swatch" data-color="#38ef7d" style="background: #38ef7d;"></div>
-  <div class="color-swatch" data-color="#00f2fe" style="background: #00f2fe;"></div>
-  <div class="color-swatch" data-color="#ff0844" style="background: #ff0844;"></div>
-  <div class="color-swatch" data-color="#f83600" style="background: #f83600;"></div>
-  <div class="color-swatch" data-color="#b224ef" style="background: #b224ef;"></div>
-  <div class="color-swatch" data-color="#fdfb54" style="background: #fdfb54;"></div>
-</div>
-</div>
-</div>
-</div>
-</section>
+  <section class="v2-section">
+    <div class="v2-section-title">Smart Home Overview</div>
+    <div class="sensors-panel" id="sensors-container"></div>
+  </section>
+
+  <div class="v2-grid-row">
+    <section class="v2-section" style="flex: 2.5;">
+      <div class="v2-section-title">Control Panel</div>
+      <div class="zones-grid" id="zones-container"></div>
+      <div id="switches-container" style="display:none;"></div> <!-- Legacy container hidden but kept for logic -->
+    </section>
+    
+    <section class="v2-section" style="flex: 1;">
+      <div class="v2-section-title">IR Remote</div>
+      <div class="v2-glass-card ir-card" style="display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; height: calc(100% - 30px); padding: 30px 20px;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:32px;height:32px;color:var(--text-muted);margin-bottom:12px;">
+          <rect x="7" y="2" width="10" height="20" rx="2" ry="2"></rect>
+          <circle cx="12" cy="6" r="1"></circle>
+          <circle cx="12" cy="18" r="1"></circle>
+          <circle cx="12" cy="14" r="1"></circle>
+          <circle cx="12" cy="10" r="1"></circle>
+        </svg>
+        <p style="font-size: 11px; color: var(--text-secondary); margin-bottom: 16px;">Click Open Remote to control your IR devices.</p>
+        <button id="btn-open-remote" class="btn-ghost">Open Remote</button>
+      </div>
+    </section>
+  </div>
+
+  <section class="v2-section" style="margin-top: 24px;">
+    <div class="v2-section-title">Loads</div>
+    <div class="loads-grid" id="loads-container"></div>
+  </section>
+
+  <section class="v2-section" style="margin-top: 24px;">
+    <div class="v2-section-title" style="display:flex; justify-content:space-between; align-items:center;">
+      Quick Scenes
+      <button id="btn-add-scene" class="btn-ghost small admin-only" style="padding: 2px 8px; font-size: 10px;">+ Create Scene</button>
+    </div>
+    <div class="scenes-grid" id="scenes-container"></div>
+  </section>
+
+  <section class="v2-section admin-only" style="margin-top: 24px;">
+    <div class="v2-section-title">Automations & Maintenance</div>
+    <div class="v2-grid-4" id="automation-container">
+      
+      <!-- Light Automation -->
+      <div class="v2-glass-card setting-card">
+        <div style="display:flex; justify-content:space-between; width:100%; align-items:center;">
+          <span class="setting-label">LIGHT AUTOMATION</span>
+          <label class="custom-toggle">
+            <input type="checkbox" id="auto-light-enabled">
+            <span class="custom-slider"></span>
+          </label>
+        </div>
+        <p style="font-size: 10px; color: var(--text-secondary); margin: 8px 0; line-height: 1.4;">Automatically turn on selected loads when the ambient light drops below the threshold.</p>
+        
+        <label style="font-size:10px; color:var(--text-muted);">Threshold %:</label>
+        <input type="number" id="auto-light-threshold" step="0.1" min="0" max="100" class="v2-input">
+        
+        <div style="display:flex; justify-content:space-between; width:100%; align-items:center; margin-top:12px;">
+          <span class="setting-label" style="font-size:10px;">TURN OFF WHEN EMPTY</span>
+          <label class="custom-toggle small">
+            <input type="checkbox" id="auto-off-enabled">
+            <span class="custom-slider"></span>
+          </label>
+        </div>
+        <label style="font-size:10px; color:var(--text-muted); margin-top:8px; display:block;">Timeout (Seconds):</label>
+        <input type="number" id="auto-off-timeout" min="10" max="3600" value="300" class="v2-input">
+        
+        <label style="font-size:10px; color:var(--text-muted); margin-top:12px; display:block;">Trigger Loads:</label>
+        <div id="auto-light-loads" style="display:flex; flex-direction:column; gap:6px; width:100%; font-size:11px;"></div>
+        
+        <button class="btn-primary v2-full-btn" id="btn-save-auto-light" style="margin-top:auto;">Save Automation</button>
+      </div>
+
+      <!-- Climate Automation -->
+      <div class="v2-glass-card setting-card">
+        <div style="display:flex; justify-content:space-between; width:100%; align-items:center;">
+          <span class="setting-label">SMART CLIMATE THERMOSTAT</span>
+          <label class="custom-toggle">
+            <input type="checkbox" id="auto-climate-enabled">
+            <span class="custom-slider"></span>
+          </label>
+        </div>
+        <p style="font-size: 10px; color: var(--text-secondary); margin: 8px 0; line-height: 1.4;">Automatically trigger IR commands when the room temperature crosses the target.</p>
+        
+        <label style="font-size:10px; color:var(--text-muted);">Target Temperature &deg;C:</label>
+        <input type="number" id="auto-climate-target" step="0.5" min="16" max="35" class="v2-input">
+        
+        <label style="font-size:10px; color:var(--text-muted); margin-top:12px; display:block;">AC Power ON Command:</label>
+        <select id="auto-climate-on-slot" class="v2-input">
+          <option value="-1">-- None --</option>
+        </select>
+        
+        <label style="font-size:10px; color:var(--text-muted); margin-top:12px; display:block;">AC Power OFF Command:</label>
+        <select id="auto-climate-off-slot" class="v2-input">
+          <option value="-1">-- None --</option>
+        </select>
+        
+        <button class="btn-primary v2-full-btn" id="btn-save-auto-climate" style="margin-top:auto;">Save Thermostat</button>
+      </div>
+
+      <!-- OTA -->
+      <div class="v2-glass-card setting-card">
+        <span class="setting-label">FIRMWARE UPDATE (OTA)</span>
+        <p style="font-size: 10px; color: var(--text-secondary); margin: 8px 0; line-height: 1.4;">Upload a compiled <code>.bin</code> firmware file to flash the device wirelessly.</p>
+        <input type="file" id="input-ota-file" accept=".bin" style="display: none;">
+        
+        <div style="display: flex; gap: 8px; margin-top: 12px;">
+          <button class="btn-ghost v2-full-btn" id="btn-select-ota" style="flex: 1;">Select .bin</button>
+          <button class="btn-primary v2-full-btn" id="btn-upload-ota" style="flex: 1;" disabled>Upload & Flash</button>
+        </div>
+        <span id="ota-file-name" style="font-size: 10px; color: var(--accent-primary); word-break: break-all; margin-top:8px; display:block;"></span>
+      </div>
+
+      <!-- Accent Color -->
+      <div class="v2-glass-card setting-card">
+        <span class="setting-label">ACCENT COLOR</span>
+        <p style="font-size: 10px; color: var(--text-secondary); margin: 8px 0; line-height: 1.4;">Choose a personalized theme color for the dashboard.</p>
+        <div style="display: flex; gap: 8px; margin-top: 12px; flex-wrap:wrap;">
+          <div class="color-swatch" data-color="#0CFFB8" style="background: #0CFFB8;"></div>
+          <div class="color-swatch" data-color="#00FFFF" style="background: #00FFFF;"></div>
+          <div class="color-swatch" data-color="#FF8C00" style="background: #FF8C00;"></div>
+          <div class="color-swatch" data-color="#b224ef" style="background: #b224ef;"></div>
+          <div class="color-swatch" data-color="#fdfb54" style="background: #fdfb54;"></div>
+        </div>
+      </div>
+
+    </div>
+  </section>
 </main>
 </div>
 <div id="config-modal" class="modal-overlay">

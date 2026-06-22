@@ -337,7 +337,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (!res.ok) throw new Error('Settings fetch failed');
       const data = await res.json();
       renderSettings(data);
-      settingsStatusBadge.textContent = 'Loaded';
+      if (settingsStatusBadge) settingsStatusBadge.textContent = 'Loaded';
 
       // Pre-fill WiFi config modal with current SSID
       const ssidInput = document.getElementById('input-ssid');
@@ -346,9 +346,19 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
     } catch (err) {
       console.warn('Settings fetch failed:', err);
-      settingsStatusBadge.textContent = 'Unavailable';
+      if (settingsStatusBadge) settingsStatusBadge.textContent = 'Unavailable';
       renderSettingsFallback();
     }
+  }
+
+  function renderSettings(settings) {
+    if (!settings) {
+      if (settingsStatusBadge) settingsStatusBadge.textContent = 'Unavailable';
+      return;
+    }
+    if (settingsStatusBadge) settingsStatusBadge.textContent = 'Loaded';
+    
+    // Additional settings rendering logic goes here if needed
   }
 
   async function updateSetting(params) {
@@ -555,23 +565,23 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Climate
     if (sensors.climate) {
-      const tempColor = sensors.climate.temperature > 30 ? '#ff5e62' : sensors.climate.temperature > 25 ? '#ff9966' : '#38ef7d';
+      const tempColor = sensors.climate.temperature > 30 ? 'var(--danger)' : sensors.climate.temperature > 25 ? 'var(--warning)' : '#fff';
       html += `
-        <div class="sensor-card">
+        <div class="v2-glass-card">
           <div class="sensor-header">
-            <span class="sensor-icon">🌡️</span>
+            <span class="sensor-icon" style="color: var(--warning);">🌡️</span>
             <span class="sensor-label">Temperature</span>
           </div>
           <span class="sensor-value" style="color: ${tempColor}">${sensors.climate.temperature.toFixed(1)}°C</span>
-          ${createSparkline(tempHist, tempColor)}
+          ${createSparkline(tempHist, tempColor !== '#fff' ? tempColor : 'var(--accent-primary)')}
         </div>
-        <div class="sensor-card">
+        <div class="v2-glass-card">
           <div class="sensor-header">
-            <span class="sensor-icon">💧</span>
+            <span class="sensor-icon" style="color: var(--info);">💧</span>
             <span class="sensor-label">Humidity</span>
           </div>
           <span class="sensor-value">${sensors.climate.humidity.toFixed(1)}%</span>
-          ${createSparkline(humHist, '#64b5f6')}
+          ${createSparkline(humHist, 'var(--info)')}
         </div>
       `;
     }
@@ -579,28 +589,29 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (sensors.light) {
       const lightIcon = sensors.light.percentage > 50 ? '☀️' : '🌙';
       html += `
-        <div class="sensor-card">
+        <div class="v2-glass-card">
           <div class="sensor-header">
-            <span class="sensor-icon">${lightIcon}</span>
+            <span class="sensor-icon" style="color: var(--warning);">${lightIcon}</span>
             <span class="sensor-label">Ambient Light</span>
           </div>
           <span class="sensor-value">${sensors.light.percentage.toFixed(1)}%</span>
-          ${createSparkline(lightHist, '#ffd54f')}
+          ${createSparkline(lightHist, 'var(--warning)')}
         </div>
       `;
     }
     // Presence
     if (sensors.presence) {
-      const motionText = sensors.presence.motion ? 'Detected' : 'Clear';
-      const color = sensors.presence.motion ? '#38ef7d' : '#9ea4bb';
-      const icon = sensors.presence.motion ? '🚶' : '🔒';
+      const motionText = sensors.presence.motion ? 'DETECTED' : 'CLEAR';
+      const color = sensors.presence.motion ? 'var(--accent-primary)' : 'var(--text-secondary)';
+      const icon = sensors.presence.motion ? '🚶‍♂️' : '🔒';
+      const glowStyle = sensors.presence.motion ? 'box-shadow: 0 0 20px rgba(12,255,184,0.15); border-color: var(--accent-primary);' : '';
       html += `
-        <div class="sensor-card">
+        <div class="v2-glass-card" style="${glowStyle}">
           <div class="sensor-header">
-            <span class="sensor-icon">${icon}</span>
-            <span class="sensor-label">Presence</span>
+            <span class="sensor-icon" style="color: ${color};">${icon}</span>
+            <span class="sensor-label" style="color: ${color};">Presence</span>
           </div>
-          <span class="sensor-value" style="color: ${color}">${motionText}</span>
+          <span class="sensor-value" style="color: ${color};">${motionText}</span>
         </div>
       `;
     }
@@ -610,46 +621,52 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function renderSwitches(switches) {
     if (!switches) return;
-    switchCountBadge.textContent = `${switches.length} Configured`;
+    if (switchCountBadge) switchCountBadge.textContent = `${switches.length} Configured`;
+    const zonesContainer = document.getElementById('zones-container');
+    if (!zonesContainer) return;
 
-    // Only rebuild DOM if the number of switches changed to avoid focus loss
-    if (switchesContainer.children.length !== switches.length) {
-      switchesContainer.innerHTML = '';
-      switches.forEach((sw, index) => {
-        const loadState = sw.hasLoad && sw.load ? sw.load.state : false;
-        const isActive = sw.hasLoad ? loadState : (sw.state === 1);
-
-        const div = document.createElement('div');
-        div.className = `switch-card ${isActive ? 'active' : ''}`;
-        div.id = `card-switch-${sw.pin}`;
-
-        const loadIdx = sw.hasLoad && sw.load && cachedLoads ? cachedLoads.findIndex(l => l.pin === sw.load.pin) : -1;
-        const loadName = loadIdx >= 0 ? `Load ${loadIdx + 1}` : '?';
-        const loadBadge = sw.hasLoad
-          ? `<span class="load-badge">⚡ ${loadName}</span>`
-          : `<span class="load-badge" style="opacity:0.4">No Load</span>`;
-
-        const displayName = sw.name || `Switch ${index + 1}`;
-        div.innerHTML = `
-          <div class="switch-header">
-            <div class="switch-header-left">
-              <span class="switch-meta-icon">💡</span>
-              <div class="switch-info">
-                <h3 style="display: flex; align-items: center; gap: 8px;">
+    if (zonesContainer.children.length === 0 || window.lastSwitchCount !== switches.length) {
+      window.lastSwitchCount = switches.length;
+      let html = '';
+      for (let i = 0; i < switches.length; i += 4) {
+        const zoneSwitches = switches.slice(i, i + 4);
+        const zoneNumber = Math.floor(i / 4) + 1;
+        html += `<div class="zone-panel">`;
+        html += `<div class="zone-header"><span>Zone ${zoneNumber}</span><span style="color:var(--text-muted)">...</span></div>`;
+        html += `<div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">`;
+        zoneSwitches.forEach((sw, idx) => {
+          const globalIndex = i + idx;
+          const loadState = sw.hasLoad && sw.load ? sw.load.state : false;
+          const isActive = sw.hasLoad ? loadState : (sw.state === 1);
+          const loadIdx = sw.hasLoad && sw.load && cachedLoads ? cachedLoads.findIndex(l => l.pin === sw.load.pin) : -1;
+          const loadBadgeText = loadIdx >= 0 ? `[L${loadIdx + 1}]` : `[--]`;
+          const displayName = sw.name || `Switch ${globalIndex + 1}`;
+          
+          html += `
+            <div class="v2-switch-item" id="card-switch-${sw.pin}">
+              <div class="v2-switch-row">
+                <span class="v2-switch-name">
                   ${displayName}
-                  ${currentUserRole === 'admin' ? `<button class="icon-btn edit-name-btn admin-only" data-type="switch" data-pin="${sw.pin}" data-name="${sw.name || ''}" title="Rename switch" style="padding: 2px;">✎</button>` : ''}
-                </h3>
-                ${loadBadge}
+                  ${currentUserRole === 'admin' ? `<button class="icon-btn edit-name-btn admin-only" data-type="switch" data-pin="${sw.pin}" data-name="${sw.name || ''}" style="padding: 0px; margin-left: 4px; font-size: 10px; border:none; background:none;">✎</button>` : ''}
+                </span>
+                <span class="v2-switch-badge" style="color: ${sw.hasLoad ? 'var(--accent-primary)' : 'var(--text-muted)'}; border-color: ${sw.hasLoad ? 'var(--accent-primary)' : 'var(--text-muted)'};">${loadBadgeText}</span>
+              </div>
+              <div class="v2-switch-row" style="margin-top: 4px;">
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <label class="custom-toggle small">
+                    <input type="checkbox" class="btn-toggle-new" data-pin="${sw.pin}" ${isActive ? 'checked' : ''}>
+                    <span class="custom-slider"></span>
+                  </label>
+                  <span class="v2-switch-state-text ${isActive ? 'on' : 'off'}">${isActive ? 'ON' : 'OFF'}</span>
+                </div>
+                ${currentUserRole === 'admin' ? `<button class="btn-manage-v2 admin-only" data-pin="${sw.pin}" data-index="${globalIndex + 1}" data-has-load="${sw.hasLoad}" data-load-pin="${sw.hasLoad && sw.load ? sw.load.pin : -1}">Manage Load <span style="font-size:10px">☰</span></button>` : ''}
               </div>
             </div>
-          </div>
-          <div class="switch-actions">
-            <button class="btn-toggle-new ${isActive ? 'on' : ''}" data-pin="${sw.pin}">${isActive ? 'Turn Off' : 'Turn On'}</button>
-            ${currentUserRole === 'admin' ? `<button class="btn-manage-new admin-only" data-pin="${sw.pin}" data-index="${index + 1}" data-has-load="${sw.hasLoad}" data-load-pin="${sw.hasLoad && sw.load ? sw.load.pin : -1}">Manage Load</button>` : ''}
-          </div>
-        `;
-        switchesContainer.appendChild(div);
-      });
+          `;
+        });
+        html += `</div></div>`;
+      }
+      zonesContainer.innerHTML = html;
 
       // Bind rename events
       document.querySelectorAll('.edit-name-btn').forEach(el => {
@@ -671,7 +688,7 @@ document.addEventListener('DOMContentLoaded', async () => {
               });
               if (res.ok) {
                 showToast('success', 'Renamed successfully', `${type} renamed to ${newName.trim()}`);
-                switchesContainer.innerHTML = ''; // force rebuild
+                zonesContainer.innerHTML = ''; // force rebuild
                 pollDeviceData();
               } else {
                 showToast('error', 'Rename Failed', 'Device error.');
@@ -683,29 +700,27 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
       });
 
-      // Bind toggle events
+      // Bind toggle events (using change instead of click for checkbox)
       document.querySelectorAll('.btn-toggle-new').forEach(el => {
-        el.addEventListener('click', async (e) => {
+        el.addEventListener('change', async (e) => {
           const pin = e.target.dataset.pin;
-          e.target.textContent = 'Wait...';
-
           try {
             const res = await fetch(getApiUrl(`/api/switch/state?pin=${pin}`), { method: 'POST' });
-            if (res.ok) {
-              showToast('success', 'Switch Toggled', `Switch pin ${pin} state changed.`);
-            } else {
+            if (!res.ok) {
+              e.target.checked = !e.target.checked; // revert
               showToast('error', 'Toggle Failed', 'Device returned an error.');
+            } else {
+               pollDeviceData();
             }
-            pollDeviceData(); // force fast update
           } catch (err) {
-            console.error('Toggle failed', err);
+            e.target.checked = !e.target.checked; // revert
             showToast('error', 'Network Error', 'Could not reach the device.');
           }
         });
       });
 
       // Bind load-attach events
-      document.querySelectorAll('.btn-manage-new').forEach(el => {
+      document.querySelectorAll('.btn-manage-v2').forEach(el => {
         el.addEventListener('click', (e) => {
           const pin = e.currentTarget.dataset.pin;
           const index = e.currentTarget.dataset.index;
@@ -719,33 +734,36 @@ document.addEventListener('DOMContentLoaded', async () => {
         const card = document.getElementById(`card-switch-${sw.pin}`);
         if (card) {
           const loadState = sw.hasLoad && sw.load ? sw.load.state : (sw.state === 1);
-          if (loadState) card.classList.add('active');
-          else card.classList.remove('active');
+          
+          const checkbox = card.querySelector('.btn-toggle-new');
+          if (checkbox) checkbox.checked = loadState;
 
-          const h3 = card.querySelector('h3');
+          const stateText = card.querySelector('.v2-switch-state-text');
+          if (stateText) {
+             stateText.className = `v2-switch-state-text ${loadState ? 'on' : 'off'}`;
+             stateText.textContent = loadState ? 'ON' : 'OFF';
+          }
+
+          const h3 = card.querySelector('.v2-switch-name');
           if (h3) {
              const displayName = sw.name || `Switch ${index + 1}`;
-             h3.childNodes[0].textContent = displayName + " ";
+             // h3 has childnodes for button, update only text
+             if(h3.childNodes[0].nodeType === 3) h3.childNodes[0].textContent = displayName + " ";
           }
 
-          const btn = card.querySelector('.btn-toggle-new');
-          if (btn) {
-            btn.className = `btn-toggle-new ${loadState ? 'on' : ''}`;
-            btn.textContent = loadState ? 'Turn Off' : 'Turn On';
+          const badge = card.querySelector('.v2-switch-badge');
+          if (badge) {
+            const loadIdx = sw.hasLoad && sw.load && cachedLoads ? cachedLoads.findIndex(l => l.pin === sw.load.pin) : -1;
+            const loadBadgeText = loadIdx >= 0 ? `[L${loadIdx + 1}]` : `[--]`;
+            badge.textContent = loadBadgeText;
+            badge.style.color = sw.hasLoad ? 'var(--accent-primary)' : 'var(--text-muted)';
+            badge.style.borderColor = sw.hasLoad ? 'var(--accent-primary)' : 'var(--text-muted)';
           }
-
-          // Update load badge
-          const loadBadgeEl = card.querySelector('.load-badge');
-          if (loadBadgeEl) {
-            if (sw.hasLoad && sw.load) {
-              const loadIdx = cachedLoads ? cachedLoads.findIndex(l => l.pin === sw.load.pin) : -1;
-              const loadName = loadIdx >= 0 ? `Load ${loadIdx + 1}` : '?';
-              loadBadgeEl.textContent = `⚡ ${loadName}`;
-              loadBadgeEl.style.opacity = '1';
-            } else {
-              loadBadgeEl.textContent = 'No Load';
-              loadBadgeEl.style.opacity = '0.4';
-            }
+          
+          const manageBtn = card.querySelector('.btn-manage-v2');
+          if(manageBtn) {
+             manageBtn.dataset.hasLoad = sw.hasLoad;
+             manageBtn.dataset.loadPin = sw.hasLoad && sw.load ? sw.load.pin : -1;
           }
         }
       });
@@ -754,12 +772,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function renderLoads(loads) {
     if (!loads || loads.length === 0) {
-      loadCountBadge.textContent = '0 Registered';
-      loadsContainer.innerHTML = '<div class="ir-empty-state">No loads registered on this node.</div>';
+      if (loadCountBadge) loadCountBadge.textContent = '0 Registered';
+      loadsContainer.innerHTML = '<div style="color:var(--text-muted); font-size:12px;">No loads registered.</div>';
       return;
     }
 
-    loadCountBadge.textContent = `${loads.length} Registered`;
+    if (loadCountBadge) loadCountBadge.textContent = `${loads.length} Registered`;
 
     // Check if data changed to avoid rebuilding
     const loadsJson = JSON.stringify(loads);
@@ -770,31 +788,27 @@ document.addEventListener('DOMContentLoaded', async () => {
     loads.forEach((load, index) => {
       const isOn = load.state === true;
       const div = document.createElement('div');
-      div.className = `glass-card load-card ${isOn ? 'active' : ''}`;
+      div.className = `v2-glass-card load-card-v2 ${isOn ? 'active' : ''}`;
       div.id = `card-load-${load.pin}`;
 
       const displayName = load.name || `Load ${index + 1}`;
       div.innerHTML = `
-        <div class="load-header">
-          <h3 style="display: flex; align-items: center; gap: 8px;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+           <span class="v2-switch-name" style="display:flex; align-items:center; gap:8px;">
+             <span style="color:var(--warning);">💡</span>
              ${displayName}
-             <button class="icon-btn edit-name-btn" data-type="load" data-pin="${load.pin}" data-name="${load.name || ''}" title="Rename load" style="padding: 2px;">✎</button>
-          </h3>
-          <div style="display:flex; gap:10px; align-items:center;">
-            <div class="load-state-dot ${isOn ? 'on' : 'off'}"></div>
-            <button class="action-btn load-trigger-btn" data-pin="${load.pin}">Toggle</button>
-          </div>
+             <button class="icon-btn edit-name-btn" data-type="load" data-pin="${load.pin}" data-name="${load.name || ''}" style="padding:0; margin-left:4px; font-size:10px; border:none; background:none; color:var(--text-muted);">✎</button>
+           </span>
+           <label class="custom-toggle small">
+              <input type="checkbox" class="load-toggle-v2" data-pin="${load.pin}" ${isOn ? 'checked' : ''}>
+              <span class="custom-slider"></span>
+           </label>
         </div>
-        <div class="load-meta">
-          <span class="load-meta-item" style="color: ${load.activeLow ? '#ff9966' : 'var(--text-muted)'}">
-            ${load.activeLow ? '⚡ Active-Low' : 'Active-High'}
-          </span>
-          <span class="load-meta-item" style="color: ${isOn ? 'var(--accent-primary)' : 'var(--text-muted)'}">
-            ${isOn ? '● ON' : '○ OFF'}
-          </span>
+        <div style="display:flex; align-items:center; gap:6px; margin-top:8px;">
+           <span style="color:${isOn ? 'var(--accent-primary)' : 'var(--text-muted)'}; font-size:10px; font-weight:700;">⚡ ${isOn ? 'ON' : 'OFF'}</span>
+           <span style="color:var(--text-secondary); font-size:9px; margin-left:auto;">${load.activeLow ? 'Active-Low' : 'Active-High'}</span>
         </div>
       `;
-
       loadsContainer.appendChild(div);
     });
 
@@ -830,23 +844,20 @@ document.addEventListener('DOMContentLoaded', async () => {
       });
     });
 
-    document.querySelectorAll('.load-trigger-btn').forEach(el => {
-      el.addEventListener('click', async (e) => {
+    document.querySelectorAll('.load-toggle-v2').forEach(el => {
+      el.addEventListener('change', async (e) => {
         const pin = e.target.dataset.pin;
-        e.target.textContent = '...';
-
         try {
           const res = await fetch(getApiUrl(`/api/load/toggle?pin=${pin}`), { method: 'POST' });
-          if (res.ok) {
-            showToast('success', 'Load Toggled', `Load pin ${pin} toggled.`);
-          } else {
+          if (!res.ok) {
+            e.target.checked = !e.target.checked;
             showToast('error', 'Toggle Failed', 'Device returned an error.');
+          } else {
+             loadsContainer.dataset.lastJson = ''; // force update 
+             pollDeviceData();
           }
-          setTimeout(() => { if (e.target) e.target.textContent = 'Toggle'; }, 400);
-          pollDeviceData(); // force fast update
         } catch (err) {
-          console.error('Toggle failed', err);
-          if (e.target) e.target.textContent = 'Toggle';
+          e.target.checked = !e.target.checked;
           showToast('error', 'Network Error', 'Could not reach the device.');
         }
       });
@@ -855,7 +866,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function renderScenes(scenes) {
     if (!scenes || scenes.length === 0) {
-      scenesContainer.innerHTML = '<div class="ir-empty-state">No scenes created yet.</div>';
+      scenesContainer.innerHTML = '<div style="color:var(--text-muted); font-size:12px;">No scenes created yet.</div>';
       return;
     }
 
@@ -866,63 +877,70 @@ document.addEventListener('DOMContentLoaded', async () => {
     scenesContainer.innerHTML = '';
     scenes.forEach(scene => {
       const div = document.createElement('div');
-      div.className = 'glass-card scene-card';
-      
-      let actionsSummary = '';
-      if (scene.actions.length === 0) {
-        actionsSummary = 'No loads configured';
-      } else {
-        const onCount = scene.actions.filter(a => a.state).length;
-        const offCount = scene.actions.filter(a => !a.state).length;
-        if (onCount > 0) actionsSummary += `${onCount} ON`;
-        if (onCount > 0 && offCount > 0) actionsSummary += ', ';
-        if (offCount > 0) actionsSummary += `${offCount} OFF`;
-      }
+      div.className = 'v2-glass-card scene-card-v2';
+      div.style.cursor = 'pointer';
+
+      // Assign a random-looking icon based on name
+      let icon = '🎬';
+      if (scene.name.toLowerCase().includes('light')) icon = '💡';
+      else if (scene.name.toLowerCase().includes('sleep') || scene.name.toLowerCase().includes('night')) icon = '🌙';
 
       div.innerHTML = `
-        <div class="scene-header">
-          <h3>${scene.name}</h3>
-          <span class="scene-id">ID: ${scene.id}</span>
+        <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+           <span class="v2-switch-name">${scene.name}</span>
+           <div style="display:flex; gap:6px; align-items:center;">
+             <div style="width:6px; height:6px; border-radius:50%; background:rgba(255,255,255,0.1);"></div>
+             <button class="icon-btn scene-del-btn" data-id="${scene.id}" style="padding:0; font-size:10px; border:none; background:none; color:var(--text-muted);" title="Delete Scene">✕</button>
+           </div>
         </div>
-        <div class="scene-meta">
-          <span class="scene-summary">${actionsSummary}</span>
-        </div>
-        <div class="scene-actions" style="display:flex; gap:10px; margin-top:16px;">
-          <button class="btn btn-primary scene-exec-btn" data-id="${scene.id}" style="flex:1;">▶ Execute</button>
-          <button class="btn btn-danger scene-del-btn" data-id="${scene.id}" style="padding:8px; display:flex; align-items:center; justify-content:center;" title="Delete Scene">
-            <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
-          </button>
+        <div style="display:flex; justify-content:space-between; align-items:flex-end;">
+           <span class="scene-icon-v2">${icon}</span>
         </div>
       `;
 
-      scenesContainer.appendChild(div);
-    });
-
-    document.querySelectorAll('.scene-exec-btn').forEach(el => {
-      el.addEventListener('click', async (e) => {
-        const id = e.target.dataset.id;
-        const btn = e.target;
-        btn.textContent = '...';
-
+      div.addEventListener('click', async (e) => {
+        if(e.target.classList.contains('scene-del-btn')) return; // handled separately
         try {
-          const res = await fetch(getApiUrl(`/api/scenes/execute?id=${id}`), { method: 'POST' });
+          const formData = new URLSearchParams();
+          formData.append('id', scene.id);
+          const res = await fetch(getApiUrl('/api/scenes/execute'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: formData.toString()
+          });
           if (res.ok) {
-            showToast('success', 'Scene Executed', `Fired scene ID ${id}.`);
+            showToast('success', 'Scene Executed', `Fired scene ID ${scene.id}.`);
+            // Flash the dot green
+            const dot = div.querySelector('div[style*="width:6px"]');
+            if(dot) { dot.style.background = 'var(--accent-primary)'; dot.style.boxShadow = '0 0 8px var(--accent-primary)'; }
+            setTimeout(() => { if(dot) { dot.style.background = 'rgba(255,255,255,0.1)'; dot.style.boxShadow = 'none'; } }, 1000);
+            pollDeviceData();
           } else {
             showToast('error', 'Execution Failed', 'Device returned an error.');
           }
-          setTimeout(() => { if (e.target) e.target.textContent = '▶ Execute'; }, 400);
-          pollDeviceData();
         } catch (err) {
-          console.error('Scene execution failed', err);
-          if (e.target) e.target.textContent = '▶ Execute';
           showToast('error', 'Network Error', 'Could not reach the device.');
         }
       });
+      scenesContainer.appendChild(div);
+    });
+
+    // Add Global Activate Button card
+    const btnDiv = document.createElement('div');
+    btnDiv.className = 'v2-glass-card';
+    btnDiv.style.justifyContent = 'center';
+    btnDiv.style.padding = '16px';
+    btnDiv.style.minWidth = '140px';
+    btnDiv.innerHTML = `<button class="btn-primary v2-full-btn" id="btn-activate-scene-global">ACTIVATE SCENE</button>`;
+    scenesContainer.appendChild(btnDiv);
+
+    btnDiv.querySelector('button').addEventListener('click', () => {
+       showToast('info', 'Activate Scene', 'Click on any scene card to activate it.');
     });
 
     document.querySelectorAll('.scene-del-btn').forEach(el => {
       el.addEventListener('click', async (e) => {
+        e.stopPropagation();
         const id = e.currentTarget.dataset.id;
         if (!confirm(`Are you sure you want to delete Scene ID ${id}?`)) return;
 
@@ -930,12 +948,12 @@ document.addEventListener('DOMContentLoaded', async () => {
           const res = await fetch(getApiUrl(`/api/scenes?id=${id}`), { method: 'DELETE' });
           if (res.ok) {
             showToast('success', 'Scene Deleted', `Removed scene ID ${id}.`);
+            loadsContainer.dataset.lastJson = ''; // force update
             pollDeviceData();
           } else {
             showToast('error', 'Deletion Failed', 'Device returned an error.');
           }
         } catch (err) {
-          console.error('Scene deletion failed', err);
           showToast('error', 'Network Error', 'Could not reach the device.');
         }
       });
