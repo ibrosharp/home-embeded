@@ -1,4 +1,5 @@
 import os
+import gzip
 
 data_dir = r'c:\Users\abdul\OneDrive\Documents\Arduino\remote\data'
 out_file = r'c:\Users\abdul\OneDrive\Documents\Arduino\remote\BootstrapFS.hpp'
@@ -13,9 +14,11 @@ with open(out_file, 'w', encoding='utf-8') as out:
     for fname in files_to_pack:
         fpath = os.path.join(data_dir, fname)
         with open(fpath, 'rb') as f:
-            data = f.read()
+            raw_data = f.read()
+            
+        data = gzip.compress(raw_data)
         
-        var_name = fname.replace('.', '_')
+        var_name = fname.replace('.', '_') + '_gz'
         out.write(f'const uint8_t {var_name}_data[] PROGMEM = {{\n')
         
         # Write bytes
@@ -41,9 +44,9 @@ with open(out_file, 'w', encoding='utf-8') as out:
     out.write('    Serial.println("Firmware updated! Overwriting LittleFS web files...");\n')
     
     for fname in files_to_pack:
-        var_name = fname.replace('.', '_')
-        out.write(f'    Serial.println("Writing /{fname}...");\n')
-        out.write(f'    File f_{var_name} = LittleFS.open(\"/{fname}\", \"w\");\n')
+        var_name = fname.replace('.', '_') + '_gz'
+        out.write(f'    Serial.println("Writing /{fname}.gz...");\n')
+        out.write(f'    File f_{var_name} = LittleFS.open(\"/{fname}.gz\", \"w\");\n')
         out.write(f'    if (f_{var_name}) {{\n')
         out.write(f'      f_{var_name}.write({var_name}_data, {var_name}_len);\n')
         out.write(f'      f_{var_name}.close();\n')

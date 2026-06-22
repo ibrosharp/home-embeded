@@ -5,18 +5,21 @@
 #include <IRremote.h>
 #include "JsonSerializable.hpp"
 
-const int MAX_IR_COMMANDS = 60;
+const int MAX_IR_DEVICES = 4;
+const int COMMANDS_PER_DEVICE = 15;
+const int MAX_IR_COMMANDS = MAX_IR_DEVICES * COMMANDS_PER_DEVICE; // 60
+
+struct IRDevice {
+    char name[32] = "";
+    bool isValid = false;
+};
 
 struct IRCommand {
     decode_type_t protocol = UNKNOWN;
     uint16_t address = 0;
     uint16_t command = 0;
     uint8_t numberOfBits = 0;
-    
-    // 🎯 New tracking fields
-    String deviceId = ""; // e.g., "tv_lg" or "ac_panasonic"
     String name = "";     // e.g., "Volume Up", "Power Off"
-    
     bool isValid = false;
 };
 
@@ -27,6 +30,7 @@ class IRController : public PreferenceModel, public JsonSerializable {
 private:
     uint8_t _recvPin;
     uint8_t _sendPin;
+    IRDevice _devices[MAX_IR_DEVICES];
     IRCommand _commandDatabase[MAX_IR_COMMANDS];
     StorageManager* _storage;
 
@@ -35,8 +39,13 @@ public:
     
     void init();
     
+    // ---- Device Management ----
+    int createDevice(const String& name);
+    bool deleteDevice(int deviceId);
+    bool isDeviceValid(int deviceId) const;
+
     // ---- Recording & Database Management ----
-    void saveCustomCommand(int slotIndex, const IRCommand& cmd);
+    bool saveCustomCommand(int deviceId, int buttonIndex, const IRCommand& cmd);
     IRCommand getCommand(int slotIndex) const;
 
     // ---- Transmission ----
@@ -52,6 +61,9 @@ public:
 
 IRController::IRController(uint8_t recvPin, uint8_t sendPin, StorageManager* storage) 
     : _recvPin(recvPin), _sendPin(sendPin), _storage(storage) {
+    for (int i = 0; i < MAX_IR_DEVICES; i++) {
+        _devices[i] = IRDevice();
+    }
     for (int i = 0; i < MAX_IR_COMMANDS; i++) {
         _commandDatabase[i] = IRCommand();
     }
@@ -64,13 +76,65 @@ void IRController::init() {
     IrSender.begin(_sendPin, DISABLE_LED_FEEDBACK);
 }
 
-void IRController::saveCustomCommand(int slotIndex, const IRCommand& cmd) {
-    if (slotIndex >= 0 && slotIndex < MAX_IR_COMMANDS) {
+int IRController::createDevice(const String& name) {
+    for (int i = 0; i < MAX_IR_DEVICES; i++) {
+        if (!_devices[i].isValid) {
+            _devices[i].isValid = true;
+            strncpy(_devices[i].name, name.c_str(), sizeof(_devices[i].name) - 1);
+            _devices[i].name[sizeof(_devices[i].name) - 1] = '\0';
+            
+            // Clear its reserved slots just in case
+            int startSlot = i * COMMANDS_PER_DEVICE;
+            for (int j = 0; j < COMMANDS_PER_DEVICE; j++) {
+                _commandDatabase[startSlot + j] = IRCommand();
+            }
+
+            if (_storage != nullptr) {
+                save(_storage->prefs());
+            }
+            return i;
+        }
+    }
+    return -1; // No free devices
+}
+
+bool IRController::deleteDevice(int deviceId) {
+    if (deviceId >= 0 && deviceId < MAX_IR_DEVICES) {
+        _devices[deviceId].isValid = false;
+        
+        // Clear slots
+        int startSlot = deviceId * COMMANDS_PER_DEVICE;
+        for (int j = 0; j < COMMANDS_PER_DEVICE; j++) {
+            _commandDatabase[startSlot + j] = IRCommand();
+        }
+
+        if (_storage != nullptr) {
+            save(_storage->prefs());
+        }
+        return true;
+    }
+    return false;
+}
+
+bool IRController::isDeviceValid(int deviceId) const {
+    if (deviceId >= 0 && deviceId < MAX_IR_DEVICES) {
+        return _devices[deviceId].isValid;
+    }
+    return false;
+}
+
+bool IRController::saveCustomCommand(int deviceId, int buttonIndex, const IRCommand& cmd) {
+    if (deviceId >= 0 && deviceId < MAX_IR_DEVICES && buttonIndex >= 0 && buttonIndex < COMMANDS_PER_DEVICE) {
+        if (!_devices[deviceId].isValid) return false;
+        
+        int slotIndex = deviceId * COMMANDS_PER_DEVICE + buttonIndex;
         _commandDatabase[slotIndex] = cmd;
         if (_storage != nullptr) {
             save(_storage->prefs());
         }
+        return true;
     }
+    return false;
 }
 
 IRCommand IRController::getCommand(int slotIndex) const {
@@ -85,15 +149,35 @@ String IRController::toJson() {
     json += "\"type\":\"irController\",";
     json += "\"recvPin\":" + String(_recvPin) + ",";
     json += "\"sendPin\":" + String(_sendPin) + ",";
-    json += "\"commands\":[";
     
+    // Devices
+    json += "\"devices\":[";
+    bool firstDevice = true;
+    for (int i = 0; i < MAX_IR_DEVICES; i++) {
+        if (_devices[i].isValid) {
+            if (!firstDevice) json += ",";
+            json += "{";
+            json += "\"id\":" + String(i) + ",";
+            json += "\"name\":\"" + String(_devices[i].name) + "\"";
+            json += "}";
+            firstDevice = false;
+        }
+    }
+    json += "],";
+
+    // Commands
+    json += "\"commands\":[";
     bool firstCommand = true;
     for (int i = 0; i < MAX_IR_COMMANDS; i++) {
         if (_commandDatabase[i].isValid) {
             if (!firstCommand) json += ",";
+            int deviceId = i / COMMANDS_PER_DEVICE;
+            int buttonIndex = i % COMMANDS_PER_DEVICE;
+
             json += "{";
             json += "\"slot\":" + String(i) + ",";
-            json += "\"deviceId\":\"" + _commandDatabase[i].deviceId + "\",";
+            json += "\"deviceId\":" + String(deviceId) + ",";
+            json += "\"buttonIndex\":" + String(buttonIndex) + ",";
             json += "\"name\":\"" + _commandDatabase[i].name + "\",";
             json += "\"protocol\":" + String(_commandDatabase[i].protocol) + ",";
             json += "\"address\":\"0x" + String(_commandDatabase[i].address, HEX) + "\",";
@@ -102,7 +186,6 @@ String IRController::toJson() {
             firstCommand = false;
         }
     }
-    
     json += "]";
     json += "}";
     return json;
@@ -111,6 +194,13 @@ String IRController::toJson() {
 bool IRController::transmitSlot(int slotIndex) {
     if (slotIndex < 0 || slotIndex >= MAX_IR_COMMANDS) return false;
     
+    // Check if the device is actually valid
+    int deviceId = slotIndex / COMMANDS_PER_DEVICE;
+    if (!_devices[deviceId].isValid) {
+        Serial.printf("[IR] Cannot transmit slot %d: Device %d is not valid.\n", slotIndex, deviceId);
+        return false;
+    }
+
     const IRCommand& cmd = _commandDatabase[slotIndex];
     if (!cmd.isValid) {
         Serial.printf("[IR] Cannot transmit slot %d: Slot is empty/unmapped.\n", slotIndex);
@@ -124,17 +214,28 @@ bool IRController::transmitSlot(int slotIndex) {
 void IRController::transmitRaw(const IRCommand& cmd) {
     IrReceiver.stop();
 
-    Serial.printf("[IR] Blasting '%s' for Device '%s'\n", cmd.name.c_str(), cmd.deviceId.c_str());
+    Serial.printf("[IR] Blasting '%s'\n", cmd.name.c_str());
     
-    // 🎯 Fixes: no matching function for call to 'IRsend::write(const uint16_t*, const uint8_t&)'
     // Invoke explicit protocol arguments layout: protocol, address, command, numberOfRepeats
     IrSender.write(cmd.protocol, cmd.address, cmd.command, 0);
 
-    // 🎯 Fixes: no matching function for call to 'IRrecv::start(uint8_t&)'
     IrReceiver.start(); 
 }
 
 bool IRController::save(Preferences &prefs) {
+    // Save Devices
+    for (int i = 0; i < MAX_IR_DEVICES; i++) {
+        char key[16];
+        snprintf(key, sizeof(key), "ir_dv_%d", i);
+        prefs.putBool(key, _devices[i].isValid);
+        
+        if (_devices[i].isValid) {
+            snprintf(key, sizeof(key), "ir_dn_%d", i);
+            prefs.putString(key, String(_devices[i].name));
+        }
+    }
+
+    // Save Commands
     for (int i = 0; i < MAX_IR_COMMANDS; i++) {
         char key[16];
         
@@ -154,9 +255,6 @@ bool IRController::save(Preferences &prefs) {
             snprintf(key, sizeof(key), "irb_%d", i);
             prefs.putUChar(key, _commandDatabase[i].numberOfBits);
             
-            snprintf(key, sizeof(key), "ird_%d", i);
-            prefs.putString(key, _commandDatabase[i].deviceId);
-            
             snprintf(key, sizeof(key), "irn_%d", i);
             prefs.putString(key, _commandDatabase[i].name);
         }
@@ -165,6 +263,23 @@ bool IRController::save(Preferences &prefs) {
 }
 
 bool IRController::load(Preferences &prefs) {
+    // Load Devices
+    for (int i = 0; i < MAX_IR_DEVICES; i++) {
+        char key[16];
+        snprintf(key, sizeof(key), "ir_dv_%d", i);
+        _devices[i].isValid = prefs.getBool(key, false);
+        
+        if (_devices[i].isValid) {
+            snprintf(key, sizeof(key), "ir_dn_%d", i);
+            String name = prefs.getString(key, "");
+            strncpy(_devices[i].name, name.c_str(), sizeof(_devices[i].name) - 1);
+            _devices[i].name[sizeof(_devices[i].name) - 1] = '\0';
+        } else {
+            _devices[i] = IRDevice();
+        }
+    }
+
+    // Load Commands
     for (int i = 0; i < MAX_IR_COMMANDS; i++) {
         char key[16];
         snprintf(key, sizeof(key), "irv_%d", i);
@@ -182,9 +297,6 @@ bool IRController::load(Preferences &prefs) {
             
             snprintf(key, sizeof(key), "irb_%d", i);
             _commandDatabase[i].numberOfBits = prefs.getUChar(key, 0);
-            
-            snprintf(key, sizeof(key), "ird_%d", i);
-            _commandDatabase[i].deviceId = prefs.getString(key, "");
             
             snprintf(key, sizeof(key), "irn_%d", i);
             _commandDatabase[i].name = prefs.getString(key, "");

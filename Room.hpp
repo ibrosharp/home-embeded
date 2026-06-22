@@ -18,6 +18,7 @@
 #include "TaskQueueManager.hpp"
 
 extern TaskQueueManager sysQueue;
+extern volatile bool globalStateChanged;
 
 
 const int MAX_RELAYS = 4;

@@ -7,9 +7,10 @@ function getApiUrl(path) {
   return DEVICE_IP + path;
 }
 
-let pollingInterval = null;
+let ws = null;
 let cachedLoads = []; // Keep load list for the load-attach modal
 let cachedHistory = null;
+let currentUserRole = 'guest';
 
 // ======================== Toast Notification System ========================
 
@@ -42,7 +43,27 @@ function dismissToast(toastEl) {
 
 // ======================== DOM Ready ========================
 
-document.addEventListener('DOMContentLoaded', () => {
+async function fetchUserRole() {
+  try {
+    const res = await fetch(getApiUrl('/api/auth/status'));
+    if (res.ok) {
+      const data = await res.json();
+      currentUserRole = data.role || 'guest';
+    }
+  } catch (err) {
+    console.error("Failed to fetch user role", err);
+  }
+}
+
+function applyRoleRestrictions() {
+  if (currentUserRole !== 'admin') {
+    document.querySelectorAll('.admin-only').forEach(el => el.style.display = 'none');
+  } else {
+    document.querySelectorAll('.admin-only').forEach(el => el.style.display = '');
+  }
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
   const loadingOverlay = document.getElementById('loading-overlay');
   const loadingMessage = document.getElementById('loading-message');
   const mainDashboard = document.getElementById('main-dashboard');
@@ -96,43 +117,25 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  if (btnAddVrDevice) {
-    btnAddVrDevice.addEventListener('click', () => {
+    if (btnAddVrDevice) {
+    btnAddVrDevice.addEventListener('click', async () => {
       const newName = prompt('Enter a name for the new Device (e.g., AC, TV):');
       if (!newName || newName.trim() === '') return;
       
-      // Find the first empty device block (0-14, 15-29, 30-44, 45-59)
-      // Max 60 slots => 4 devices.
-      const usedBlocks = new Set();
-      globalIrCommands.forEach(cmd => {
-        if (cmd.deviceId) {
-          const blockIndex = Math.floor(cmd.slot / 15);
-          usedBlocks.add(blockIndex);
+      try {
+        const res = await fetch(getApiUrl(`/api/ir/devices?name=${encodeURIComponent(newName.trim())}`), { method: 'POST' });
+        const data = await res.json();
+        
+        if (res.ok) {
+           showToast('success', 'Device Created', 'Device added successfully.');
+           currentSelectedVrDevice = String(data.deviceId);
+           pollDeviceData(); // Will trigger re-render
+        } else {
+           showToast('error', 'Limit Reached', data.error || 'Cannot create device.');
         }
-      });
-
-      let targetBlock = -1;
-      for (let i = 0; i < 4; i++) {
-        if (!usedBlocks.has(i)) {
-          targetBlock = i;
-          break;
-        }
+      } catch(err) {
+         showToast('error', 'Network Error', 'Could not reach the device.');
       }
-
-      if (targetBlock === -1) {
-        showToast('error', 'Limit Reached', 'You can only create up to 4 devices.');
-        return;
-      }
-
-      const startingSlot = targetBlock * 15;
-      
-      // Immediately open the IR record modal for slot 0 of this device
-      irModalTitle.textContent = 'Record First Command';
-      inputIrSlot.value = startingSlot;
-      inputIrDevice.value = newName.trim();
-      inputIrName.value = 'Power'; // Default name suggestion
-      
-      irModal.classList.add('active');
     });
   }
 
@@ -156,38 +159,108 @@ document.addEventListener('DOMContentLoaded', () => {
   const inputLoadSwitchPin = document.getElementById('input-load-switch-pin');
   const inputLoadPin = document.getElementById('input-load-pin');
 
+  // ======================== Theme Logic ========================
+  
+  function applyAccentColor(hex) {
+    document.documentElement.style.setProperty('--accent-primary', hex);
+    
+    // Create a darker variant for gradients if not pure hex
+    // Using simple transparency for the glow and secondary colors
+    document.documentElement.style.setProperty('--active-glow', hex + '4D'); // 30% opacity
+    
+    // Mark the correct swatch as active
+    document.querySelectorAll('.color-swatch').forEach(sw => {
+      if (sw.dataset.color === hex) {
+        sw.classList.add('active');
+      } else {
+        sw.classList.remove('active');
+      }
+    });
+  }
+
+  const savedColor = localStorage.getItem('smartHomeAccentColor');
+  if (savedColor) {
+    applyAccentColor(savedColor);
+  } else {
+    // Default to the first swatch if none saved
+    const firstSwatch = document.querySelector('.color-swatch');
+    if (firstSwatch) {
+      firstSwatch.classList.add('active');
+    }
+  }
+
+  document.querySelectorAll('.color-swatch').forEach(swatch => {
+    swatch.addEventListener('click', () => {
+      const color = swatch.dataset.color;
+      applyAccentColor(color);
+      localStorage.setItem('smartHomeAccentColor', color);
+    });
+  });
+
   // ======================== Initial Health Check ========================
 
+  await fetchUserRole();
+  applyRoleRestrictions();
+
+  // Initialize WebSocket connection
+  function initWebSocket() {
+    const wsUrl = `ws://${DEVICE_IP ? DEVICE_IP : window.location.host}/ws`;
+    ws = new WebSocket(wsUrl);
+
+    ws.onopen = () => {
+      console.log('WebSocket Connected');
+      statusText.textContent = 'Connected (Real-time)';
+      statusDot.className = 'status-dot connected';
+      wifiBadge.textContent = 'Connected';
+      wifiBadge.className = 'badge success';
+      loadingOverlay.style.opacity = '0';
+      setTimeout(() => {
+        loadingOverlay.style.display = 'none';
+        mainDashboard.style.display = 'block';
+      }, 500);
+      
+      // Fetch initial full state
+      pollDeviceData();
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        renderSensors(data.sensors);
+        cachedLoads = data.loads || []; // Cache loads for UI lookup
+        renderSwitches(data.switches);
+        renderLoads(data.loads);
+        renderScenes(data.scenes);
+        renderAutomations(data);
+        renderSettings(data.settings);
+        
+        // Cache globals for other interactions
+        globalIrDevices = data.ir.devices || [];
+        globalIrCommands = data.ir.commands || [];
+      } catch (err) {
+        console.error('WS Parse Error:', err);
+      }
+    };
+
+    ws.onclose = () => {
+      console.log('WebSocket Disconnected');
+      statusText.textContent = 'Reconnecting...';
+      statusDot.className = 'status-dot error';
+      setTimeout(initWebSocket, 2000);
+    };
+  }
+
   async function initialHealthCheck() {
-    loadingMessage.textContent = 'Checking device status...';
+    loadingMessage.textContent = 'Connecting to real-time service...';
     try {
       const res = await fetch(getApiUrl('/api/status'), { signal: AbortSignal.timeout(5000) });
       if (!res.ok) throw new Error('Status check failed');
-      const data = await res.json();
-
-      if (data.status === 'operational') {
-        loadingMessage.textContent = 'Device online. Loading dashboard...';
-        // Transition to dashboard
-        await fetchDeviceData();
-        await fetchSettings();
-      } else {
-        loadingMessage.textContent = 'Device in provisioning mode. Opening config...';
-        showDashboard();
-        configModal.classList.add('active');
-      }
-    } catch (err) {
-      console.warn('Health check failed, trying direct room fetch...', err);
-      loadingMessage.textContent = 'Retrying connection...';
-      // Fall back to fetching room data directly
-      try {
-        await fetchDeviceData();
-        await fetchSettings();
-        await fetchAutomations();
-      } catch (err2) {
-        loadingMessage.innerHTML = '<span style="color:#ff5e62">Device Offline.</span><br><span style="color:#9ea4bb;font-size:12px">Check that ' + DEVICE_IP + ' is reachable</span>';
-        // Retry every 5 seconds
-        setTimeout(initialHealthCheck, 5000);
-      }
+      
+      initWebSocket();
+    } catch (error) {
+      console.error(error);
+      loadingMessage.textContent = 'Connection failed. Retrying...';
+      setTimeout(initialHealthCheck, 3000);
     }
   }
 
@@ -203,25 +276,18 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!res.ok) throw new Error('Room fetch failed');
     const data = await res.json();
 
-    // On first successful load, show the dashboard and start polling
+    // On first successful load, show the dashboard
     if (loadingOverlay.style.display !== 'none') {
       showDashboard();
-      startPolling();
       fetchHistory(); // initial fetch
       setInterval(fetchHistory, 60000); // refresh history every 60s
     }
-
-    // Update connection status
-    wifiBadge.textContent = 'Node Online';
-    wifiBadge.classList.remove('offline');
-    statusDot.className = 'status-dot online';
-    statusText.textContent = 'Connected — polling every 3s';
 
     renderSensors(data.sensors);
     renderSwitches(data.switches);
     renderLoads(data.loads);
     if (data.controllers && data.controllers.ir) {
-      renderIRCommands(data.controllers.ir.commands);
+      renderIRCommands(data.controllers.ir);
     }
     
     // Scenes
@@ -259,17 +325,8 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       await fetchDeviceData();
     } catch (err) {
-      console.warn('Poll failed:', err);
-      wifiBadge.textContent = 'Offline';
-      wifiBadge.classList.add('offline');
-      statusDot.className = 'status-dot offline';
-      statusText.textContent = 'Connection lost — retrying...';
+      console.warn('Manual fetch failed:', err);
     }
-  }
-
-  function startPolling() {
-    if (pollingInterval) clearInterval(pollingInterval);
-    pollingInterval = setInterval(pollDeviceData, 3000);
   }
 
   // ======================== Settings API ========================
@@ -564,17 +621,53 @@ document.addEventListener('DOMContentLoaded', () => {
           ? `<span class="load-badge">⚡ ${loadName}</span>`
           : `<span class="load-badge" style="opacity:0.4">No Load</span>`;
 
+        const displayName = sw.name || `Switch ${index + 1}`;
         div.innerHTML = `
           <div class="switch-header">
-            <h3>Switch ${index + 1}</h3>
+            <h3 style="display: flex; align-items: center; gap: 8px;">
+              ${displayName}
+              ${currentUserRole === 'admin' ? `<button class="icon-btn edit-name-btn admin-only" data-type="switch" data-pin="${sw.pin}" data-name="${sw.name || ''}" title="Rename switch" style="padding: 2px;">✎</button>` : ''}
+            </h3>
             ${loadBadge}
           </div>
           <div class="switch-actions">
             <button class="action-btn trigger-btn" data-pin="${sw.pin}" data-isactive="${isActive}">Toggle</button>
-            <button class="action-btn small load-attach-btn btn-secondary" data-pin="${sw.pin}" data-index="${index + 1}" data-has-load="${sw.hasLoad}" data-load-pin="${sw.hasLoad && sw.load ? sw.load.pin : -1}" title="Manage load">${sw.hasLoad ? 'Manage Load' : 'Assign Load'}</button>
+            ${currentUserRole === 'admin' ? `<button class="action-btn small load-attach-btn btn-secondary admin-only" data-pin="${sw.pin}" data-index="${index + 1}" data-has-load="${sw.hasLoad}" data-load-pin="${sw.hasLoad && sw.load ? sw.load.pin : -1}" title="Manage load">${sw.hasLoad ? 'Manage Load' : 'Assign Load'}</button>` : ''}
           </div>
         `;
         switchesContainer.appendChild(div);
+      });
+
+      // Bind rename events
+      document.querySelectorAll('.edit-name-btn').forEach(el => {
+        el.addEventListener('click', async (e) => {
+          const type = e.currentTarget.dataset.type;
+          const pin = e.currentTarget.dataset.pin;
+          const currentName = e.currentTarget.dataset.name;
+          const newName = prompt(`Enter a new name for this ${type}:`, currentName);
+          if (newName !== null && newName.trim() !== '') {
+            try {
+              const formData = new URLSearchParams();
+              formData.append('type', type);
+              formData.append('pin', pin);
+              formData.append('name', newName.trim());
+              const res = await fetch(getApiUrl('/api/hardware/rename'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: formData.toString()
+              });
+              if (res.ok) {
+                showToast('success', 'Renamed successfully', `${type} renamed to ${newName.trim()}`);
+                switchesContainer.innerHTML = ''; // force rebuild
+                pollDeviceData();
+              } else {
+                showToast('error', 'Rename Failed', 'Device error.');
+              }
+            } catch (err) {
+              showToast('error', 'Network Error', 'Could not reach device.');
+            }
+          }
+        });
       });
 
       // Bind toggle events
@@ -611,12 +704,18 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     } else {
       // Just update states smoothly without rebuilding DOM
-      switches.forEach(sw => {
+      switches.forEach((sw, index) => {
         const card = document.getElementById(`card-switch-${sw.pin}`);
         if (card) {
           const loadState = sw.hasLoad && sw.load ? sw.load.state : (sw.state === 1);
           if (loadState) card.classList.add('active');
           else card.classList.remove('active');
+
+          const h3 = card.querySelector('h3');
+          if (h3) {
+             const displayName = sw.name || `Switch ${index + 1}`;
+             h3.childNodes[0].textContent = displayName + " ";
+          }
 
           const btn = card.querySelector('.trigger-btn');
           if (btn) {
@@ -671,9 +770,13 @@ document.addEventListener('DOMContentLoaded', () => {
       div.className = `load-card ${isOn ? 'active' : ''}`;
       div.id = `card-load-${load.pin}`;
 
+      const displayName = load.name || `Load ${index + 1}`;
       div.innerHTML = `
         <div class="load-header">
-          <h3>Load ${index + 1}</h3>
+          <h3 style="display: flex; align-items: center; gap: 8px;">
+             ${displayName}
+             <button class="icon-btn edit-name-btn" data-type="load" data-pin="${load.pin}" data-name="${load.name || ''}" title="Rename load" style="padding: 2px;">✎</button>
+          </h3>
           <div style="display:flex; gap:10px; align-items:center;">
             <div class="load-state-dot ${isOn ? 'on' : 'off'}"></div>
             <button class="action-btn load-trigger-btn" data-pin="${load.pin}">Toggle</button>
@@ -690,6 +793,38 @@ document.addEventListener('DOMContentLoaded', () => {
       `;
 
       loadsContainer.appendChild(div);
+    });
+
+    // Bind rename events
+    document.querySelectorAll('#loads-container .edit-name-btn').forEach(el => {
+      el.addEventListener('click', async (e) => {
+        const type = e.currentTarget.dataset.type;
+        const pin = e.currentTarget.dataset.pin;
+        const currentName = e.currentTarget.dataset.name;
+        const newName = prompt(`Enter a new name for this ${type}:`, currentName);
+        if (newName !== null && newName.trim() !== '') {
+          try {
+            const formData = new URLSearchParams();
+            formData.append('type', type);
+            formData.append('pin', pin);
+            formData.append('name', newName.trim());
+            const res = await fetch(getApiUrl('/api/hardware/rename'), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+              body: formData.toString()
+            });
+            if (res.ok) {
+              showToast('success', 'Renamed successfully', `${type} renamed to ${newName.trim()}`);
+              loadsContainer.dataset.lastJson = ''; // force rebuild
+              pollDeviceData();
+            } else {
+              showToast('error', 'Rename Failed', 'Device error.');
+            }
+          } catch (err) {
+            showToast('error', 'Network Error', 'Could not reach device.');
+          }
+        }
+      });
     });
 
     document.querySelectorAll('.load-trigger-btn').forEach(el => {
@@ -810,36 +945,31 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    // Determine which block this device is using
-    let targetBlock = -1;
-    for (let i = 0; i < 4; i++) {
-      const blockStart = i * 15;
-      const cmdInBlock = globalIrCommands.find(c => c.slot >= blockStart && c.slot < blockStart + 15 && c.deviceId);
-      if (cmdInBlock && cmdInBlock.deviceId === currentSelectedVrDevice) {
-        targetBlock = i;
-        break;
-      }
+
+
+    const deviceIdInt = parseInt(currentSelectedVrDevice);
+    const device = globalIrDevices.find(d => d.id === deviceIdInt);
+    
+    if (!device) {
+       vrGrid.innerHTML = '<div style="grid-column: span 3; text-align:center; color:var(--text-muted); padding: 20px;">Device not found</div>';
+       return;
     }
 
-    if (targetBlock === -1) {
-      vrGrid.innerHTML = '<div style="grid-column: span 3; text-align:center; color:var(--text-muted); padding: 20px;">Empty device - add a command to see slots</div>';
-      return;
-    }
-
-    const startSlot = targetBlock * 15;
     vrGrid.innerHTML = '';
 
+    const startSlot = deviceIdInt * 15;
+
+    // Render exactly 15 buttons per device
     for (let i = 0; i < 15; i++) {
+      const btn = document.createElement('div');
       const slotIndex = startSlot + i;
       const cmd = globalIrCommands.find(c => parseInt(c.slot) === slotIndex);
-      
-      const btn = document.createElement('div');
       
       if (cmd && cmd.name) {
         btn.className = 'vr-btn';
         btn.innerHTML = `
           <span>${cmd.name}</span>
-          <div class="vr-edit-icon" data-slot="${slotIndex}" data-device="${currentSelectedVrDevice}" data-name="${cmd.name}" title="Edit/Re-record">✎</div>
+          <div class="vr-edit-icon" data-slot="${slotIndex}" data-device="${device.name}" data-name="${cmd.name}" title="Edit/Re-record">✎</div>
         `;
         
         btn.addEventListener('click', async (e) => {
@@ -862,7 +992,7 @@ document.addEventListener('DOMContentLoaded', () => {
         btn.addEventListener('click', () => {
           irModalTitle.textContent = 'Record Command';
           inputIrSlot.value = slotIndex;
-          inputIrDevice.value = currentSelectedVrDevice;
+          inputIrDevice.value = device.name;
           inputIrName.value = '';
           irModal.classList.add('active');
         });
@@ -870,6 +1000,27 @@ document.addEventListener('DOMContentLoaded', () => {
       
       vrGrid.appendChild(btn);
     }
+
+    // Add a delete button for the device
+    const delBtn = document.createElement('button');
+    delBtn.className = 'btn btn-danger';
+    delBtn.style.gridColumn = 'span 3';
+    delBtn.style.marginTop = '16px';
+    delBtn.textContent = 'Delete Device';
+    delBtn.addEventListener('click', async () => {
+       if(!confirm(`Delete device ${device.name} and all its commands?`)) return;
+       try {
+           const res = await fetch(getApiUrl(`/api/ir/devices?id=${deviceIdInt}`), { method: 'DELETE' });
+           if (res.ok) {
+              showToast('success', 'Device Deleted', 'Device removed.');
+              currentSelectedVrDevice = '-1';
+              pollDeviceData();
+           }
+       } catch(err) {
+           showToast('error', 'Network Error', 'Could not delete device.');
+       }
+    });
+    vrGrid.appendChild(delBtn);
 
     vrGrid.querySelectorAll('.vr-edit-icon').forEach(icon => {
       icon.addEventListener('click', (e) => {
@@ -883,27 +1034,23 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  function renderIRCommands(commands) {
-    globalIrCommands = commands || [];
-
-    const uniqueDevices = new Set();
-    globalIrCommands.forEach(cmd => {
-      if (cmd.deviceId) uniqueDevices.add(cmd.deviceId);
-    });
+  function renderIRCommands(irData) {
+    globalIrCommands = irData.commands || [];
+    globalIrDevices = irData.devices || [];
 
     if (vrDeviceSelect) {
       const oldVal = vrDeviceSelect.value;
       let optionsHtml = '<option value="-1">-- Select Device --</option>';
-      uniqueDevices.forEach(dev => {
-        optionsHtml += `<option value="${dev}">${dev}</option>`;
+      globalIrDevices.forEach(dev => {
+        optionsHtml += `<option value="${dev.id}">${dev.name}</option>`;
       });
       vrDeviceSelect.innerHTML = optionsHtml;
       
-      if (uniqueDevices.has(oldVal)) {
+      if (globalIrDevices.find(d => String(d.id) === oldVal)) {
         vrDeviceSelect.value = oldVal;
         currentSelectedVrDevice = oldVal;
-      } else if (uniqueDevices.size > 0 && (!currentSelectedVrDevice || currentSelectedVrDevice === '-1')) {
-        const first = Array.from(uniqueDevices)[0];
+      } else if (globalIrDevices.length > 0 && (!currentSelectedVrDevice || currentSelectedVrDevice === '-1')) {
+        const first = String(globalIrDevices[0].id);
         vrDeviceSelect.value = first;
         currentSelectedVrDevice = first;
       } else {
@@ -917,8 +1064,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const datalist = document.getElementById('ir-device-list');
     if (datalist) {
-      datalist.innerHTML = Array.from(uniqueDevices)
-        .map(deviceId => `<option value="${deviceId}"></option>`)
+      datalist.innerHTML = globalIrDevices
+        .map(dev => `<option value="${dev.id}">${dev.name}</option>`)
         .join('');
     }
 
@@ -984,6 +1131,19 @@ document.addEventListener('DOMContentLoaded', () => {
         </div>
       </div>
 
+      <!-- Authentication -->
+      <div class="setting-card">
+        <span class="setting-label">Authentication</span>
+        <div class="setting-card-header" style="flex-direction: column; gap: 8px;">
+          <input type="text" class="setting-inline-input" id="input-auth-user" value="${settings.authUsername || 'admin'}" placeholder="Admin Username">
+          <input type="password" class="setting-inline-input" id="input-auth-pass" value="${settings.authPassword || 'admin'}" placeholder="Admin Password">
+          <input type="password" class="setting-inline-input" id="input-guest-pass" value="${settings.guestPassword || 'guest'}" placeholder="Guest Password">
+        </div>
+        <div class="setting-actions" style="margin-top: 8px;">
+          <button class="action-btn small btn-primary" id="btn-save-auth">Save Credentials</button>
+        </div>
+      </div>
+
       <!-- Namespace -->
       <div class="setting-card">
         <span class="setting-label">Storage Namespace</span>
@@ -1009,6 +1169,17 @@ document.addEventListener('DOMContentLoaded', () => {
       // Optimistic UI update
       const display = document.getElementById('display-led-state');
       if (display) display.textContent = e.target.checked ? 'Enabled' : 'Disabled';
+    });
+
+    document.getElementById('btn-save-auth')?.addEventListener('click', () => {
+      const authUser = document.getElementById('input-auth-user').value;
+      const authPass = document.getElementById('input-auth-pass').value;
+      const guestPass = document.getElementById('input-guest-pass').value;
+      if (!authUser || !authPass || !guestPass) {
+        showToast('error', 'Validation Error', 'All credential fields are required');
+        return;
+      }
+      updateSetting({ authUser, authPass, guestPass });
     });
   }
 
@@ -1058,7 +1229,7 @@ document.addEventListener('DOMContentLoaded', () => {
     submitBtn.disabled = true;
 
     try {
-      const res = await fetch(getApiUrl(`/api/ir/record?slot=${slot}&deviceId=${encodeURIComponent(deviceId)}&name=${encodeURIComponent(name)}`), { method: 'POST' });
+      const res = await fetch(getApiUrl(`/api/ir/record?slot=${slot}&name=${encodeURIComponent(name)}`), { method: 'POST' });
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
         showToast('success', 'IR Recorded', data.message || `Command "${name}" saved to slot ${slot}.`);

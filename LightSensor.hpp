@@ -7,6 +7,7 @@
 #include "TaskQueueManager.hpp"
 
 extern TaskQueueManager sysQueue;
+extern volatile bool globalStateChanged;
 
 class LightSensor : public JsonSerializable {
 private:
@@ -37,6 +38,9 @@ void LightSensor::init() {
 void LightSensor::update() {
     // Read the 12-bit ADC value (returns a range from 0 to 4095 on an ESP32)
     int newRaw = analogRead(_pin);
+    if (abs(newRaw - _lastRawValue) > 50) { // Avoid flooding Websocket with tiny ADC noise (50/4095 ~ 1.2%)
+        globalStateChanged = true;
+    }
     _lastRawValue = newRaw;
 }
 

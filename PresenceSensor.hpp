@@ -7,6 +7,7 @@
 #include "TaskQueueManager.hpp"
 
 extern TaskQueueManager sysQueue;
+extern volatile bool globalStateChanged;
 
 class PresenceSensor : public JsonSerializable {
 private:
@@ -50,6 +51,7 @@ void PresenceSensor::update() {
             if (_falseStableCount >= FALSE_STABLE_THRESHOLD) {
                 _lastMotion = false;
                 _falseStableCount = 0;
+                globalStateChanged = true;
                 sysQueue.push(new Firmware::LoggingTask(Firmware::LogLevel::INFO, "PRESENCE", String("Motion=false after stable false period pin=") + _pin));
             }
         } else {
@@ -61,6 +63,7 @@ void PresenceSensor::update() {
         if (newMotion) {
             _lastMotion = true;
             _falseStableCount = 0;
+            globalStateChanged = true;
             sysQueue.push(new Firmware::LoggingTask(Firmware::LogLevel::INFO, "PRESENCE", String("Motion=true pin=") + _pin));
         }
     }

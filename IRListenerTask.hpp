@@ -13,8 +13,7 @@ extern void triggerFeedback();
 struct IRCaptureRequest {
     volatile int    slot     = -1;
     volatile bool   pending  = false;
-    char            deviceId[32] = {};
-    char            name[32]    = {};
+    char            name[32] = {};
 };
 
 // Defined in remote.ino (extern declared here so both the task and the
@@ -46,19 +45,21 @@ inline void IRListenerTask(void* pvParameters) {
                     IRController* ir = room.getIRController();
                     if (ir != nullptr) {
                         int slot = irCaptureRequest.slot;
+                        int deviceId = slot / 15;
+                        int buttonIndex = slot % 15;
+
                         IRCommand cmd;
                         cmd.protocol = IrReceiver.decodedIRData.protocol;
                         cmd.address = IrReceiver.decodedIRData.address;
                         cmd.command = IrReceiver.decodedIRData.command;
                         cmd.numberOfBits = IrReceiver.decodedIRData.numberOfBits;
-                        cmd.deviceId = String(irCaptureRequest.deviceId);
                         cmd.name = String(irCaptureRequest.name);
                         cmd.isValid = true;
 
-                        ir->saveCustomCommand(slot, cmd);
+                        ir->saveCustomCommand(deviceId, buttonIndex, cmd);
 
-                        Serial.printf("[IR LISTENER] Saved IR Signal to slot %d -> Device: %s, Name: %s\n", 
-                                      slot, cmd.deviceId.c_str(), cmd.name.c_str());
+                        Serial.printf("[IR LISTENER] Saved IR Signal to slot %d -> Name: %s\n", 
+                                      slot, cmd.name.c_str());
                         
                         irCaptureRequest.pending = false;
                         irCaptureRequest.slot    = -1;

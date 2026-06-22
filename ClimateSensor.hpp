@@ -9,6 +9,7 @@
 #include "ErrorManager.hpp"
 
 extern TaskQueueManager sysQueue;
+extern volatile bool globalStateChanged;
 
 class ClimateSensor : public JsonSerializable {
 private:
@@ -59,6 +60,9 @@ void ClimateSensor::update() {
                 sysQueue.push(new Firmware::LoggingTask(Firmware::LogLevel::WARNING, "CLIMATE", String("ClimateSensor read failed (nan)")));
             }
         } else {
+            if (_lastTemperature != t || _lastHumidity != h) {
+                globalStateChanged = true;
+            }
             _lastTemperature = t;
             _lastHumidity = h;
             if (!_isHealthy) {

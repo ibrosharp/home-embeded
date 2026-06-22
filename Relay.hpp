@@ -11,6 +11,7 @@
 
 extern TaskQueueManager sysQueue;
 extern void triggerFeedback();
+extern volatile bool globalStateChanged;
 
 class Relay : public PreferenceModel, public JsonSerializable {
 private:
@@ -20,6 +21,7 @@ private:
     bool _isActiveLow;                 // Configuration flag if the physical relay module triggers on LOW
     const char* _storageKey;
     StorageManager* _storage;
+    char _name[32];
 
 public:
     Relay();
@@ -49,6 +51,8 @@ public:
     bool getState() const;
 
     uint8_t getPin() const { return _pin; }
+    void setName(const String& name);
+    String getName() const;
 
     String toJson() override;
 
@@ -63,7 +67,9 @@ Relay::Relay()
     : _hardwareManager(nullptr), _pin(0), _state(false), _isActiveLow(false), _storageKey(nullptr), _storage(nullptr) {}
 
 Relay::Relay(HardwareManager& hardwareManager, uint8_t pin, const char* storageKey, StorageManager& storage, bool isActiveLow)
-    : _hardwareManager(&hardwareManager), _pin(pin), _state(false), _isActiveLow(isActiveLow), _storageKey(storageKey), _storage(&storage) {}
+    : _hardwareManager(&hardwareManager), _pin(pin), _state(false), _isActiveLow(isActiveLow), _storageKey(storageKey), _storage(&storage) {
+        _name[0] = '\0';
+    }
 
 void Relay::init(HardwareManager& hardwareManager, uint8_t pin, const char* storageKey, StorageManager& storage, bool isActiveLow) {
     _hardwareManager = &hardwareManager;
@@ -71,6 +77,7 @@ void Relay::init(HardwareManager& hardwareManager, uint8_t pin, const char* stor
     _isActiveLow = isActiveLow;
     _storageKey = storageKey;
     _storage = &storage;
+    _name[0] = '\0';
 }
 
 void Relay::begin() {
@@ -112,6 +119,7 @@ void Relay::turnOn() {
     _state = true;
     uint8_t pinValue = _isActiveLow ? LOW : HIGH;
     _hardwareManager->writePin(_pin, pinValue);
+    globalStateChanged = true;
     save(_storage->prefs());
     triggerFeedback();
     sysQueue.push(new Firmware::LoggingTask(Firmware::LogLevel::DEBUG, "RELAY", String("Relay turned ON pin=") + _pin + " key=" + (_storageKey ? _storageKey : "null")));
@@ -121,6 +129,7 @@ void Relay::turnOff() {
     _state = false;
     uint8_t pinValue = _isActiveLow ? HIGH : LOW;
     _hardwareManager->writePin(_pin, pinValue);
+    globalStateChanged = true;
     save(_storage->prefs());
     triggerFeedback();
     sysQueue.push(new Firmware::LoggingTask(Firmware::LogLevel::DEBUG, "RELAY", String("Relay turned OFF pin=") + _pin + " key=" + (_storageKey ? _storageKey : "null")));
@@ -144,11 +153,22 @@ bool Relay::getState() const {
     return isOn();
 }
 
+void Relay::setName(const String& name) {
+    strncpy(_name, name.c_str(), sizeof(_name) - 1);
+    _name[sizeof(_name) - 1] = '\0';
+    if (_storage != nullptr) save(_storage->prefs());
+}
+
+String Relay::getName() const {
+    return String(_name);
+}
+
 String Relay::toJson() {
     String json = "{";
     json += "\"type\":\"load\",";
     json += "\"pin\":" + String(_pin) + ",";
     json += "\"key\":\"" + String(_storageKey ? _storageKey : "null") + "\",";
+    json += "\"name\":\"" + String(_name) + "\",";
     json += "\"state\":" + String(isOn() ? "true" : "false") + ",";
     json += "\"activeLow\":" + String(_isActiveLow ? "true" : "false");
     json += "}";
@@ -161,6 +181,11 @@ bool Relay::save(Preferences &prefs) {
         return false;
     }
     prefs.putBool(_storageKey, _state);
+    
+    char nameKey[24];
+    snprintf(nameKey, sizeof(nameKey), "%s_n", _storageKey);
+    prefs.putString(nameKey, String(_name));
+
     sysQueue.push(new Firmware::LoggingTask(Firmware::LogLevel::DEBUG, "RELAY", String("Relay state saved key=") + _storageKey + " value=" + (_state ? "1" : "0")));
     return true;
 }
@@ -171,6 +196,13 @@ bool Relay::load(Preferences &prefs) {
         return false;
     }
     _state = prefs.getBool(_storageKey, _state);
+
+    char nameKey[24];
+    snprintf(nameKey, sizeof(nameKey), "%s_n", _storageKey);
+    String loadedName = prefs.getString(nameKey, "");
+    strncpy(_name, loadedName.c_str(), sizeof(_name) - 1);
+    _name[sizeof(_name) - 1] = '\0';
+
     sysQueue.push(new Firmware::LoggingTask(Firmware::LogLevel::DEBUG, "RELAY", String("Relay state loaded key=") + _storageKey + " value=" + (_state ? "1" : "0")));
     return true;
 }

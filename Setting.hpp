@@ -16,12 +16,13 @@ private:
     bool ledFeedbackEnabled;
     String authUsername;
     String authPassword;
+    String guestPassword;
     const char* namespaceName; // NVS requires a namespace (max 15 characters)
     StorageManager* _storage;
 
 public:
     Setting(const char* ns, StorageManager* storage = nullptr) 
-        : namespaceName(ns), defaultTargetTemp(24.0), ledFeedbackEnabled(true), _storage(storage), authUsername("admin"), authPassword("admin") {}
+        : namespaceName(ns), defaultTargetTemp(24.0), ledFeedbackEnabled(true), _storage(storage), authUsername("admin"), authPassword("admin"), guestPassword("guest") {}
 
     void setStorage(StorageManager* storage) { _storage = storage; }
 
@@ -55,9 +56,11 @@ public:
     
     String getAuthUsername() const { return authUsername; }
     String getAuthPassword() const { return authPassword; }
-    void setAuth(String user, String pass) {
+    String getGuestPassword() const { return guestPassword; }
+    void setAuth(String user, String pass, String guestPass) {
         authUsername = user;
         authPassword = pass;
+        guestPassword = guestPass;
         if (_storage) {
             save(_storage->prefs());
         }
@@ -73,6 +76,7 @@ public:
         json += "\"wifiPassword\":\"" + wifiPassword + "\",";
         json += "\"authUsername\":\"" + authUsername + "\",";
         json += "\"authPassword\":\"" + authPassword + "\",";
+        json += "\"guestPassword\":\"" + guestPassword + "\",";
         json += "\"defaultTargetTemp\":" + String(defaultTargetTemp, 2) + ",";
         json += "\"ledFeedbackEnabled\":" + String(ledFeedbackEnabled ? "true" : "false") + ",";
         json += "\"namespace\":\"" + String(namespaceName) + "\"";
@@ -86,6 +90,7 @@ public:
         prefs.putString("wifi_pass", wifiPassword);
         prefs.putString("auth_user", authUsername);
         prefs.putString("auth_pass", authPassword);
+        prefs.putString("guest_pass", guestPassword);
         prefs.putFloat("temp", defaultTargetTemp);
         prefs.putBool("led", ledFeedbackEnabled);
         return true;
@@ -98,6 +103,7 @@ public:
         wifiPassword = prefs.getString("wifi_pass", "");
         authUsername = prefs.getString("auth_user", "admin");
         authPassword = prefs.getString("auth_pass", "admin");
+        guestPassword = prefs.getString("guest_pass", "guest");
         defaultTargetTemp = prefs.getFloat("temp", 24.0);
         ledFeedbackEnabled = prefs.getBool("led", true);
         return true;

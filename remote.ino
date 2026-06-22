@@ -61,6 +61,7 @@ StorageManager globalStorage("sys_config");
 SmartWebServer myWebServer(globalStorage, 80);
 TaskQueueManager sysQueue(15);
 IRCaptureRequest irCaptureRequest;
+volatile bool globalStateChanged = false;
 
 static inline void logDebug(const char* tag, const String& message) {
     sysQueue.push(new Firmware::LoggingTask(Firmware::LogLevel::DEBUG, tag, message));

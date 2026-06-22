@@ -12,6 +12,7 @@
 
 extern TaskQueueManager sysQueue;
 extern void triggerFeedback();
+extern volatile bool globalStateChanged;
 
 class Switch : public PreferenceModel, public JsonSerializable {
 private:
@@ -30,6 +31,7 @@ private:
 
     uint8_t _loadedRelayPin;
     bool _hasLoadedRelayPin;
+    char _name[32];
 
 public:
     Switch();
@@ -46,6 +48,9 @@ public:
 
     bool hasLoadedRelayPin() const { return _hasLoadedRelayPin; }
     uint8_t getLoadedRelayPin() const { return _loadedRelayPin; }
+    
+    void setName(const String& name);
+    String getName() const;
 
     void attachRelay(Relay* relay, bool saveToStorage = true);
     bool save(Preferences &prefs) override;
@@ -63,7 +68,9 @@ Switch::Switch()
 Switch::Switch(HardwareManager& hardwareManager, uint8_t pin, const char* storageKey, StorageManager& storage, unsigned long debounceDelay)
     : _hardwareManager(&hardwareManager), _pin(pin), _state(HIGH), _lastState(HIGH), _lastPinState(HIGH),
       _lastDebounceTime(0), _debounceDelay(debounceDelay), _relay(nullptr), _storageKey(storageKey), _storage(&storage),
-      _loadedRelayPin(255), _hasLoadedRelayPin(false) {}
+      _loadedRelayPin(255), _hasLoadedRelayPin(false) {
+        _name[0] = '\0';
+      }
 
 void Switch::init(HardwareManager& hardwareManager, uint8_t pin, const char* storageKey, StorageManager& storage, unsigned long debounceDelay) {
     _hardwareManager = &hardwareManager;
@@ -74,6 +81,7 @@ void Switch::init(HardwareManager& hardwareManager, uint8_t pin, const char* sto
     _storage = &storage;
     _loadedRelayPin = 255;
     _hasLoadedRelayPin = false;
+    _name[0] = '\0';
 }
 
 void Switch::begin() {
@@ -103,6 +111,7 @@ void Switch::setState(uint8_t newState) {
     if (_state != newState) {
         _lastState = _state;
         _state = newState;
+        globalStateChanged = true;
         save(_storage->prefs());
         triggerFeedback();
         if (_relay != nullptr) {
@@ -127,6 +136,7 @@ void Switch::update() {
             _lastDebounceTime = 0;
             _lastState = _state;
             _state = (_state == HIGH) ? LOW : HIGH;
+            globalStateChanged = true;
             sysQueue.push(new Firmware::LoggingTask(Firmware::LogLevel::INFO, "SWITCH", String("Switch pin changed pin=") + _pin + " newLogicalState=" + _state + " physicalPin=" + reading));
             triggerFeedback();
 
@@ -156,6 +166,10 @@ bool Switch::save(Preferences &prefs) {
     uint8_t attachedPin = (_relay != nullptr) ? _relay->getPin() : 255;
     prefs.putUChar(relayKey, attachedPin);
 
+    char nameKey[24];
+    snprintf(nameKey, sizeof(nameKey), "%s_n", _storageKey);
+    prefs.putString(nameKey, String(_name));
+
     sysQueue.push(new Firmware::LoggingTask(Firmware::LogLevel::DEBUG, "SWITCH", String("Switch state saved key=") + _storageKey + " value=" + _state + " attachedRelayPin=" + attachedPin));
     return true;
 }
@@ -174,6 +188,12 @@ bool Switch::load(Preferences &prefs) {
         _loadedRelayPin = prefs.getUChar(relayKey, 255);
         _hasLoadedRelayPin = true;
     }
+
+    char nameKey[24];
+    snprintf(nameKey, sizeof(nameKey), "%s_n", _storageKey);
+    String loadedName = prefs.getString(nameKey, "");
+    strncpy(_name, loadedName.c_str(), sizeof(_name) - 1);
+    _name[sizeof(_name) - 1] = '\0';
 
     sysQueue.push(new Firmware::LoggingTask(Firmware::LogLevel::DEBUG, "SWITCH", String("Switch state loaded key=") + _storageKey + " value=" + _state + " loadedRelayPin=" + (_hasLoadedRelayPin ? String(_loadedRelayPin) : "none")));
     return true;
@@ -195,11 +215,22 @@ uint8_t Switch::getState() const {
     return _state;
 }
 
+void Switch::setName(const String& name) {
+    strncpy(_name, name.c_str(), sizeof(_name) - 1);
+    _name[sizeof(_name) - 1] = '\0';
+    if (_storage != nullptr) save(_storage->prefs());
+}
+
+String Switch::getName() const {
+    return String(_name);
+}
+
 String Switch::toJson() {
     String json = "{";
     json += "\"type\":\"switch\",";
     json += "\"pin\":" + String(_pin) + ",";
     json += "\"key\":\"" + String(_storageKey ? _storageKey : "null") + "\",";
+    json += "\"name\":\"" + String(_name) + "\",";
     json += "\"state\":" + String(_state) + ",";
     json += "\"lastState\":" + String(_lastState) + ",";
     json += "\"debounceDelay\":" + String(_debounceDelay) + ",";

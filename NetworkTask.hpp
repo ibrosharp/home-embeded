@@ -3,6 +3,7 @@
 
 #include <Arduino.h>
 #include <WiFi.h>
+#include <ESPmDNS.h>
 #include "SmartWebServer.hpp"
 #include "TaskQueueManager.hpp"
 #include "StorageManager.hpp"
@@ -15,6 +16,7 @@
 extern StorageManager globalStorage;
 extern SmartWebServer myWebServer;
 extern TaskQueueManager sysQueue;
+extern volatile bool globalStateChanged;
 
 #define LED_INDICATOR 5
 
@@ -72,6 +74,13 @@ inline void WebServerTask(void* pvParameters) {
             sysQueue.push(new Firmware::LoggingTask(Firmware::LogLevel::WARNING, "NETWORK", "Static IP assignment failed. Defaulting back to assigned DHCP IP."));
         }
 
+        if (!MDNS.begin("smarthub")) {
+            sysQueue.push(new Firmware::LoggingTask(Firmware::LogLevel::ERROR, "NETWORK", "Error setting up MDNS responder!"));
+        } else {
+            sysQueue.push(new Firmware::LoggingTask(Firmware::LogLevel::DEBUG, "NETWORK", "mDNS responder started at smarthub.local"));
+            MDNS.addService("http", "tcp", 80);
+        }
+
         myWebServer.begin(SmartWebServer::MODE_OPERATIONAL);
 
     } else {
@@ -106,6 +115,12 @@ inline void WebServerTask(void* pvParameters) {
 
     for(;;) {
         myWebServer.handleClient();
+        myWebServer.cleanupClients();
+        
+        if (globalStateChanged) {
+            globalStateChanged = false;
+            myWebServer.broadcastState();
+        }
         
         bool currentConnected = (WiFi.status() == WL_CONNECTED);
         if (currentConnected != lastConnected) {

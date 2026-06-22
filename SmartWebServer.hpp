@@ -24,15 +24,28 @@ public:
 
 private:
     AsyncWebServer _server;
+    AsyncWebSocket _ws;
     ServerMode _currentMode;
     StorageManager& _storage;
 
-    bool isAuthenticated(AsyncWebServerRequest *request) {
+    bool isAdmin(AsyncWebServerRequest *request) {
         Setting* setting = Room::getInstance().getSetting();
         if (setting) {
             return request->authenticate(setting->getAuthUsername().c_str(), setting->getAuthPassword().c_str());
         }
         return request->authenticate("admin", "admin");
+    }
+
+    bool isGuest(AsyncWebServerRequest *request) {
+        Setting* setting = Room::getInstance().getSetting();
+        if (setting) {
+            return request->authenticate("guest", setting->getGuestPassword().c_str());
+        }
+        return request->authenticate("guest", "guest");
+    }
+
+    bool isAuthenticated(AsyncWebServerRequest *request) {
+        return isAdmin(request) || isGuest(request);
     }
 
     String getArg(AsyncWebServerRequest *request, const String& name) {
@@ -49,14 +62,17 @@ private:
     void handleRootOperational(AsyncWebServerRequest *request);
     void handleNotFound(AsyncWebServerRequest *request);
     void handleSaveConfig(AsyncWebServerRequest *request);
+    void handleCreateIRDevice(AsyncWebServerRequest *request);
+    void handleDeleteIRDevice(AsyncWebServerRequest *request);
     void handleGetIRDatabaseAPI(AsyncWebServerRequest *request);
-    void handleRecordIRCommand(AsyncWebServerRequest *request); 
+    void handleRecordIRCommand(AsyncWebServerRequest *request);
     void handleEmitIRCommand(AsyncWebServerRequest *request);   
     void handleGetRoom(AsyncWebServerRequest *request);
     void handleUpdateSettings(AsyncWebServerRequest *request);
     void handleSwitchState(AsyncWebServerRequest *request);   
     void handleSwitchLoad(AsyncWebServerRequest *request);   
     void handleLoadToggle(AsyncWebServerRequest *request);
+    void handleHardwareRename(AsyncWebServerRequest *request);
     
     // Automation
     void handleLightAutomation(AsyncWebServerRequest *request);
@@ -82,6 +98,8 @@ public:
     
     // Configures endpoints based on the current network state
     void begin(ServerMode mode);
+    void broadcastState();
+    void cleanupClients();
     
     // Must be called inside your FreeRTOS network loop (No-op for async, kept for compatibility)
     void handleClient();
@@ -89,10 +107,33 @@ public:
 
 // Implementation
 
-SmartWebServer::SmartWebServer(StorageManager& storage, uint16_t port) 
-    : _server(port), _currentMode(MODE_OFFLINE), _storage(storage) {}
+SmartWebServer::SmartWebServer(StorageManager& storage, uint16_t port)
+        : _server(port), _ws("/ws"), _currentMode(MODE_OFFLINE), _storage(storage) {
+        
+        _ws.onEvent([this](AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len) {
+            if (type == WS_EVT_CONNECT) {
+                Serial.printf("WS Client connected: %u\n", client->id());
+                this->broadcastState();
+            } else if (type == WS_EVT_DISCONNECT) {
+                Serial.printf("WS Client disconnected: %u\n", client->id());
+            }
+        });
+        
+        _server.addHandler(&_ws);
+    }
 
-void SmartWebServer::begin(ServerMode mode) {
+    void SmartWebServer::broadcastState() {
+        if (_ws.count() > 0) {
+            Room& room = Room::getInstance();
+            _ws.textAll(room.toJson());
+        }
+    }
+
+    void SmartWebServer::cleanupClients() {
+        _ws.cleanupClients();
+    }
+
+    void SmartWebServer::begin(ServerMode mode) {
     _currentMode = mode;
     
     if (!LittleFS.begin(true)) {
@@ -108,17 +149,32 @@ void SmartWebServer::begin(ServerMode mode) {
 
     auto serveFile = [this](AsyncWebServerRequest *request, const char* path, const char* mime) {
         REQUIRE_AUTH;
-        request->send(LittleFS, path, mime);
+        String gzPath = String(path) + ".gz";
+        if (LittleFS.exists(gzPath)) {
+            AsyncWebServerResponse *response = request->beginResponse(LittleFS, gzPath, mime);
+            response->addHeader("Content-Encoding", "gzip");
+            request->send(response);
+        } else {
+            request->send(LittleFS, path, mime);
+        }
     };
 
     _server.on("/", HTTP_GET, [this, serveFile](AsyncWebServerRequest *request) { serveFile(request, "/index.html", "text/html"); });
     _server.on("/style.css", HTTP_GET, [this, serveFile](AsyncWebServerRequest *request) { serveFile(request, "/style.css", "text/css"); });
     _server.on("/app.js", HTTP_GET, [this, serveFile](AsyncWebServerRequest *request) { serveFile(request, "/app.js", "application/javascript"); });
 
+    _server.on("/api/auth/status", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        REQUIRE_AUTH;
+        String role = this->isAdmin(request) ? "admin" : "guest";
+        request->send(200, "application/json", "{\"success\":true,\"role\":\"" + role + "\"}");
+    });
+
     _server.on("/api/config", HTTP_GET, [this](AsyncWebServerRequest *request) { REQUIRE_AUTH; this->handleRootConfig(request); });
     _server.on("/api/save", HTTP_POST, [this](AsyncWebServerRequest *request) { REQUIRE_AUTH; this->handleSaveConfig(request); });
     _server.on("/api/status", HTTP_GET, [this](AsyncWebServerRequest *request) { REQUIRE_AUTH; this->handleRootOperational(request); });
     _server.on("/api/room", HTTP_GET, [this](AsyncWebServerRequest *request) { REQUIRE_AUTH; this->handleGetRoom(request); });
+    _server.on("/api/ir/devices", HTTP_POST, [this](AsyncWebServerRequest *request) { REQUIRE_AUTH; this->handleCreateIRDevice(request); });
+    _server.on("/api/ir/devices", HTTP_DELETE, [this](AsyncWebServerRequest *request) { REQUIRE_AUTH; this->handleDeleteIRDevice(request); });
     _server.on("/api/ir/commands", HTTP_GET, [this](AsyncWebServerRequest *request) { REQUIRE_AUTH; this->handleGetIRDatabaseAPI(request); });
     _server.on("/api/ir/record", HTTP_POST, [this](AsyncWebServerRequest *request) { REQUIRE_AUTH; this->handleRecordIRCommand(request); });
     _server.on("/api/ir/emit", HTTP_POST, [this](AsyncWebServerRequest *request) { REQUIRE_AUTH; this->handleEmitIRCommand(request); });
@@ -126,6 +182,7 @@ void SmartWebServer::begin(ServerMode mode) {
     _server.on("/api/switch/state", HTTP_POST, [this](AsyncWebServerRequest *request) { REQUIRE_AUTH; this->handleSwitchState(request); });
     _server.on("/api/switch/load", HTTP_POST, [this](AsyncWebServerRequest *request) { REQUIRE_AUTH; this->handleSwitchLoad(request); });
     _server.on("/api/load/toggle", HTTP_POST, [this](AsyncWebServerRequest *request) { REQUIRE_AUTH; this->handleLoadToggle(request); });
+    _server.on("/api/hardware/rename", HTTP_POST, [this](AsyncWebServerRequest *request) { REQUIRE_AUTH; this->handleHardwareRename(request); });
     _server.on("/api/automation/light", HTTP_GET, [this](AsyncWebServerRequest *request) { REQUIRE_AUTH; this->handleLightAutomation(request); });
     _server.on("/api/automation/light", HTTP_POST, [this](AsyncWebServerRequest *request) { REQUIRE_AUTH; this->handleUpdateLightAutomation(request); });
     _server.on("/api/automation/climate", HTTP_GET, [this](AsyncWebServerRequest *request) { REQUIRE_AUTH; this->handleClimateAutomation(request); });
@@ -305,15 +362,61 @@ void SmartWebServer::handleGetIRDatabaseAPI(AsyncWebServerRequest *request) {
     request->send(200, "application/json", ir->toJson());
 }
 
+// POST /api/ir/devices
+void SmartWebServer::handleCreateIRDevice(AsyncWebServerRequest *request) {
+    if (!hasArg(request, "name")) {
+        request->send(400, "application/json", "{\"success\":false,\"error\":\"Missing required param: name\"}");
+        return;
+    }
+
+    String name = getArg(request, "name");
+    
+    Room& room = Room::getInstance();
+    IRController* ir = room.getIRController();
+    if (ir == nullptr) {
+        request->send(404, "application/json", "{\"success\":false,\"error\":\"IR controller not available\"}");
+        return;
+    }
+
+    int deviceId = ir->createDevice(name);
+    if (deviceId >= 0) {
+        request->send(200, "application/json", "{\"success\":true,\"deviceId\":" + String(deviceId) + "}");
+    } else {
+        request->send(500, "application/json", "{\"success\":false,\"error\":\"Cannot create device, limit reached\"}");
+    }
+}
+
+// DELETE /api/ir/devices
+void SmartWebServer::handleDeleteIRDevice(AsyncWebServerRequest *request) {
+    if (!hasArg(request, "id")) {
+        request->send(400, "application/json", "{\"success\":false,\"error\":\"Missing required param: id\"}");
+        return;
+    }
+
+    int id = getArg(request, "id").toInt();
+
+    Room& room = Room::getInstance();
+    IRController* ir = room.getIRController();
+    if (ir == nullptr) {
+        request->send(404, "application/json", "{\"success\":false,\"error\":\"IR controller not available\"}");
+        return;
+    }
+
+    if (ir->deleteDevice(id)) {
+        request->send(200, "application/json", "{\"success\":true}");
+    } else {
+        request->send(404, "application/json", "{\"success\":false,\"error\":\"Device not found\"}");
+    }
+}
+
 // POST /api/ir/record
 void SmartWebServer::handleRecordIRCommand(AsyncWebServerRequest *request) {
-    if (!hasArg(request, "slot") || !hasArg(request, "deviceId") || !hasArg(request, "name")) {
-        request->send(400, "application/json", "{\"success\":false,\"error\":\"Missing required params: slot, deviceId, name\"}");
+    if (!hasArg(request, "slot") || !hasArg(request, "name")) {
+        request->send(400, "application/json", "{\"success\":false,\"error\":\"Missing required params: slot, name\"}");
         return;
     }
 
     int slot = getArg(request, "slot").toInt();
-    String deviceId = getArg(request, "deviceId");
     String name = getArg(request, "name");
 
     if (slot < 0 || slot >= MAX_IR_COMMANDS) {
@@ -321,16 +424,22 @@ void SmartWebServer::handleRecordIRCommand(AsyncWebServerRequest *request) {
         return;
     }
 
-    if (deviceId.length() == 0 || name.length() == 0) {
-        request->send(400, "application/json", "{\"success\":false,\"error\":\"deviceId and name cannot be empty\"}");
+    if (name.length() == 0) {
+        request->send(400, "application/json", "{\"success\":false,\"error\":\"name cannot be empty\"}");
+        return;
+    }
+
+    Room& room = Room::getInstance();
+    IRController* ir = room.getIRController();
+    int deviceId = slot / 15;
+    if (ir == nullptr || !ir->isDeviceValid(deviceId)) {
+        request->send(400, "application/json", "{\"success\":false,\"error\":\"Target device is not valid\"}");
         return;
     }
 
     irCaptureRequest.slot = slot;
     irCaptureRequest.pending = true;
-    strncpy(irCaptureRequest.deviceId, deviceId.c_str(), sizeof(irCaptureRequest.deviceId) - 1);
     strncpy(irCaptureRequest.name, name.c_str(), sizeof(irCaptureRequest.name) - 1);
-    irCaptureRequest.deviceId[sizeof(irCaptureRequest.deviceId) - 1] = '\0';
     irCaptureRequest.name[sizeof(irCaptureRequest.name) - 1] = '\0';
 
     request->send(200, "application/json", "{\"success\":true,\"message\":\"IR record request queued\"}");
@@ -415,7 +524,8 @@ void SmartWebServer::handleUpdateSettings(AsyncWebServerRequest *request) {
             updated = true;
         }
         if (hasArg(request, "authUser") && hasArg(request, "authPass")) {
-            settings->setAuth(getArg(request, "authUser"), getArg(request, "authPass"));
+            String guestPass = hasArg(request, "guestPass") ? getArg(request, "guestPass") : settings->getGuestPassword();
+            settings->setAuth(getArg(request, "authUser"), getArg(request, "authPass"), guestPass);
             updated = true;
         }
 
@@ -488,21 +598,55 @@ void SmartWebServer::handleSwitchLoad(AsyncWebServerRequest *request) {
 // POST /api/load/toggle
 void SmartWebServer::handleLoadToggle(AsyncWebServerRequest *request) {
     if (!hasArg(request, "pin")) {
-        request->send(400, "application/json", "{\"success\":false,\"error\":\"Missing required param: 'pin'\"}");
+        request->send(400, "application/json", "{\"success\":false,\"error\":\"Missing param: pin\"}");
         return;
     }
-    uint8_t pin = (uint8_t)getArg(request, "pin").toInt();
 
+    uint8_t pin = getArg(request, "pin").toInt();
     Room& room = Room::getInstance();
-    Relay* relay = room.findRelayByPin(pin);
     
-    if (relay == nullptr) {
-        request->send(404, "application/json", "{\"success\":false,\"error\":\"Load not found for given pin\"}");
+    Relay* relay = room.findRelayByPin(pin);
+    if (!relay) {
+        request->send(404, "application/json", "{\"success\":false,\"error\":\"Load not found\"}");
         return;
     }
 
     relay->toggle();
-    request->send(200, "application/json", "{\"success\":true,\"message\":\"Load toggled\",\"load\":" + relay->toJson() + "}");
+    request->send(200, "application/json", "{\"success\":true}");
+}
+
+// POST /api/hardware/rename
+void SmartWebServer::handleHardwareRename(AsyncWebServerRequest *request) {
+    if (!hasArg(request, "type") || !hasArg(request, "pin") || !hasArg(request, "name")) {
+        request->send(400, "application/json", "{\"success\":false,\"error\":\"Missing required parameters: type, pin, name\"}");
+        return;
+    }
+
+    String type = getArg(request, "type");
+    uint8_t pin = getArg(request, "pin").toInt();
+    String name = getArg(request, "name");
+
+    Room& room = Room::getInstance();
+
+    if (type == "switch") {
+        Switch* sw = room.findSwitchByPin(pin);
+        if (sw) {
+            sw->setName(name);
+            request->send(200, "application/json", "{\"success\":true}");
+        } else {
+            request->send(404, "application/json", "{\"success\":false,\"error\":\"Switch not found\"}");
+        }
+    } else if (type == "load") {
+        Relay* relay = room.findRelayByPin(pin);
+        if (relay) {
+            relay->setName(name);
+            request->send(200, "application/json", "{\"success\":true}");
+        } else {
+            request->send(404, "application/json", "{\"success\":false,\"error\":\"Load not found\"}");
+        }
+    } else {
+        request->send(400, "application/json", "{\"success\":false,\"error\":\"Invalid type, must be 'switch' or 'load'\"}");
+    }
 }
 
 // ======================== OTA UPDATE HANDLERS ========================
