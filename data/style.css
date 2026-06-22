@@ -61,9 +61,9 @@ to{
 transform:translateX(120%);opacity:0;}
 }
 .dashboard-container{
-width:100%;max-width:1200px;background:var(--panel-bg);backdrop-filter:var(--glass-blur);border:1px solid var(--panel-border);border-radius:var(--radius-2xl);padding:30px;display:flex;flex-direction:column;gap:30px;}
+width:100%;max-width:1200px;background:rgba(15,15,20,0.7);backdrop-filter:blur(24px);border:1px solid rgba(255,255,255,0.04);box-shadow:0 30px 60px rgba(0,0,0,0.4);border-radius:24px;padding:35px;display:flex;flex-direction:column;gap:35px;}
 .app-header{
-display:flex;justify-content:space-between;align-items:center;padding-bottom:20px;border-bottom:1px solid var(--panel-border);}
+display:flex;justify-content:space-between;align-items:center;padding-bottom:10px;}
 .logo-area{
 display:flex;align-items:center;gap:12px;}
 .logo-icon{
@@ -101,17 +101,21 @@ opacity:1;}
 opacity:0.4;}
 }
 .sensors-panel{
-display:grid;grid-template-columns:repeat(4,1fr);gap:16px;}
+display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:20px;}
 .sensor-card{
-background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.04);border-radius:var(--radius-lg);padding:16px;display:flex;flex-direction:column;gap:8px;transition:border-color var(--transition-med);}
+background:linear-gradient(145deg,rgba(255,255,255,0.03) 0%,rgba(255,255,255,0.01) 100%);border:1px solid rgba(255,255,255,0.03);box-shadow:0 8px 32px rgba(0,0,0,0.15);border-radius:20px;padding:24px;display:flex;flex-direction:column;gap:12px;position:relative;overflow:hidden;transition:transform var(--transition-med),box-shadow var(--transition-med);}
+.sensor-card::before{
+content:'';position:absolute;top:0;left:0;right:0;height:100%;background:radial-gradient(circle at top left,rgba(255,255,255,0.05) 0%,transparent 60%);pointer-events:none;}
 .sensor-card:hover{
-border-color:rgba(255,255,255,0.1);}
-.sensor-label{
-font-size:11px;color:var(--text-muted);text-transform:uppercase;font-weight:600;letter-spacing:0.5px;}
-.sensor-value{
-font-size:24px;font-weight:700;color:#fff;text-shadow:0 0 10px rgba(255,255,255,0.2);transition:color var(--transition-med);}
+transform:translateY(-3px);box-shadow:0 12px 40px rgba(0,0,0,0.25);}
+.sensor-header{
+display:flex;align-items:center;gap:10px;}
 .sensor-icon{
-font-size:18px;margin-bottom:4px;}
+font-size:20px;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.2));}
+.sensor-label{
+font-size:12px;color:var(--text-muted);text-transform:uppercase;font-weight:600;letter-spacing:1px;}
+.sensor-value{
+font-size:32px;font-weight:700;color:#fff;text-shadow:0 2px 10px rgba(0,0,0,0.3);margin-top:4px;}
 .hardware-grid-layout{
 display:grid;grid-template-columns:3fr 1fr;gap:24px;}
 .section-title-bar{
@@ -121,25 +125,41 @@ font-size:16px;font-weight:600;}
 .section-badge{
 font-size:10px;font-weight:600;color:var(--text-secondary);background:rgba(255,255,255,0.05);padding:3px 8px;border-radius:10px;}
 .switches-grid{
-display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:16px;}
+display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:20px;}
 .switch-card{
-background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.05);border-radius:var(--radius-lg);padding:16px;display:flex;flex-direction:column;gap:12px;transition:all var(--transition-med);position:relative;overflow:hidden;}
-.switch-card::before{
-content:'';position:absolute;top:0;left:0;right:0;height:2px;background:var(--accent-grad);opacity:0;transition:opacity var(--transition-med);}
+background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.03);border-radius:20px;padding:20px;display:flex;flex-direction:column;gap:16px;transition:all var(--transition-med);position:relative;overflow:hidden;}
+.switch-card:hover{
+transform:translateY(-2px);background:rgba(255,255,255,0.03);box-shadow:0 10px 24px rgba(0,0,0,0.2);}
 .switch-card.active{
-border-color:rgba(56,239,125,0.3);background:rgba(56,239,125,0.02);box-shadow:0 4px 20px rgba(56,239,125,0.1);}
-.switch-card.active::before{
-opacity:1;}
+background:linear-gradient(145deg,rgba(56,239,125,0.05),rgba(0,0,0,0));border-color:rgba(56,239,125,0.15);}
+.switch-card.active .switch-meta-icon{
+color:#38ef7d;text-shadow:0 0 10px rgba(56,239,125,0.4);}
 .switch-header{
-display:flex;justify-content:space-between;align-items:center;}
+display:flex;justify-content:space-between;align-items:flex-start;}
+.switch-header-left{
+display:flex;align-items:center;gap:12px;}
+.switch-meta-icon{
+font-size:22px;color:var(--text-muted);transition:color var(--transition-med);}
+.switch-info{
+display:flex;flex-direction:column;gap:4px;}
 .switch-header h3{
-font-size:14px;font-weight:600;}
-.pin-label{
-font-family:monospace;font-size:12px;color:var(--text-secondary);background:rgba(0,0,0,0.3);padding:2px 6px;border-radius:6px;}
+font-size:15px;font-weight:600;margin:0;}
 .load-badge{
-font-size:9px;color:#ff9966;border:1px solid rgba(255,153,102,0.3);padding:2px 6px;border-radius:8px;}
+font-size:10px;font-weight:500;color:#ff9966;border:1px solid rgba(255,153,102,0.2);background:rgba(255,153,102,0.05);padding:3px 8px;border-radius:12px;display:inline-block;width:fit-content;}
 .switch-actions{
-display:flex;gap:8px;align-items:center;margin-top:4px;}
+display:flex;gap:10px;align-items:center;}
+.btn-toggle-new{
+flex:1;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);color:var(--text-primary);padding:8px;border-radius:10px;font-size:12px;font-weight:600;cursor:pointer;transition:all var(--transition-fast);}
+.btn-toggle-new:hover{
+background:rgba(255,255,255,0.1);}
+.btn-toggle-new.on{
+background:rgba(56,239,125,0.1);border-color:rgba(56,239,125,0.2);color:#38ef7d;}
+.btn-toggle-new.on:hover{
+background:rgba(56,239,125,0.15);}
+.btn-manage-new{
+background:transparent;border:1px solid rgba(255,255,255,0.1);color:var(--text-secondary);padding:8px 12px;border-radius:10px;font-size:12px;cursor:pointer;transition:all var(--transition-fast);}
+.btn-manage-new:hover{
+background:rgba(255,255,255,0.05);color:var(--text-primary);}
 .loads-section{
 margin-top:0;}
 .loads-grid{

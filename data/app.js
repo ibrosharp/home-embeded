@@ -558,14 +558,18 @@ document.addEventListener('DOMContentLoaded', async () => {
       const tempColor = sensors.climate.temperature > 30 ? '#ff5e62' : sensors.climate.temperature > 25 ? '#ff9966' : '#38ef7d';
       html += `
         <div class="sensor-card">
-          <span class="sensor-icon">🌡️</span>
-          <span class="sensor-label">Temperature</span>
+          <div class="sensor-header">
+            <span class="sensor-icon">🌡️</span>
+            <span class="sensor-label">Temperature</span>
+          </div>
           <span class="sensor-value" style="color: ${tempColor}">${sensors.climate.temperature.toFixed(1)}°C</span>
           ${createSparkline(tempHist, tempColor)}
         </div>
         <div class="sensor-card">
-          <span class="sensor-icon">💧</span>
-          <span class="sensor-label">Humidity</span>
+          <div class="sensor-header">
+            <span class="sensor-icon">💧</span>
+            <span class="sensor-label">Humidity</span>
+          </div>
           <span class="sensor-value">${sensors.climate.humidity.toFixed(1)}%</span>
           ${createSparkline(humHist, '#64b5f6')}
         </div>
@@ -576,8 +580,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       const lightIcon = sensors.light.percentage > 50 ? '☀️' : '🌙';
       html += `
         <div class="sensor-card">
-          <span class="sensor-icon">${lightIcon}</span>
-          <span class="sensor-label">Ambient Light</span>
+          <div class="sensor-header">
+            <span class="sensor-icon">${lightIcon}</span>
+            <span class="sensor-label">Ambient Light</span>
+          </div>
           <span class="sensor-value">${sensors.light.percentage.toFixed(1)}%</span>
           ${createSparkline(lightHist, '#ffd54f')}
         </div>
@@ -590,8 +596,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       const icon = sensors.presence.motion ? '🚶' : '🔒';
       html += `
         <div class="sensor-card">
-          <span class="sensor-icon">${icon}</span>
-          <span class="sensor-label">Presence</span>
+          <div class="sensor-header">
+            <span class="sensor-icon">${icon}</span>
+            <span class="sensor-label">Presence</span>
+          </div>
           <span class="sensor-value" style="color: ${color}">${motionText}</span>
         </div>
       `;
@@ -624,15 +632,20 @@ document.addEventListener('DOMContentLoaded', async () => {
         const displayName = sw.name || `Switch ${index + 1}`;
         div.innerHTML = `
           <div class="switch-header">
-            <h3 style="display: flex; align-items: center; gap: 8px;">
-              ${displayName}
-              ${currentUserRole === 'admin' ? `<button class="icon-btn edit-name-btn admin-only" data-type="switch" data-pin="${sw.pin}" data-name="${sw.name || ''}" title="Rename switch" style="padding: 2px;">✎</button>` : ''}
-            </h3>
-            ${loadBadge}
+            <div class="switch-header-left">
+              <span class="switch-meta-icon">💡</span>
+              <div class="switch-info">
+                <h3 style="display: flex; align-items: center; gap: 8px;">
+                  ${displayName}
+                  ${currentUserRole === 'admin' ? `<button class="icon-btn edit-name-btn admin-only" data-type="switch" data-pin="${sw.pin}" data-name="${sw.name || ''}" title="Rename switch" style="padding: 2px;">✎</button>` : ''}
+                </h3>
+                ${loadBadge}
+              </div>
+            </div>
           </div>
           <div class="switch-actions">
-            <button class="action-btn trigger-btn" data-pin="${sw.pin}" data-isactive="${isActive}">Toggle</button>
-            ${currentUserRole === 'admin' ? `<button class="action-btn small load-attach-btn btn-secondary admin-only" data-pin="${sw.pin}" data-index="${index + 1}" data-has-load="${sw.hasLoad}" data-load-pin="${sw.hasLoad && sw.load ? sw.load.pin : -1}" title="Manage load">${sw.hasLoad ? 'Manage Load' : 'Assign Load'}</button>` : ''}
+            <button class="btn-toggle-new ${isActive ? 'on' : ''}" data-pin="${sw.pin}">${isActive ? 'Turn Off' : 'Turn On'}</button>
+            ${currentUserRole === 'admin' ? `<button class="btn-manage-new admin-only" data-pin="${sw.pin}" data-index="${index + 1}" data-has-load="${sw.hasLoad}" data-load-pin="${sw.hasLoad && sw.load ? sw.load.pin : -1}">Manage Load</button>` : ''}
           </div>
         `;
         switchesContainer.appendChild(div);
@@ -671,10 +684,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       });
 
       // Bind toggle events
-      document.querySelectorAll('.trigger-btn').forEach(el => {
+      document.querySelectorAll('.btn-toggle-new').forEach(el => {
         el.addEventListener('click', async (e) => {
           const pin = e.target.dataset.pin;
-          e.target.textContent = '...';
+          e.target.textContent = 'Wait...';
 
           try {
             const res = await fetch(getApiUrl(`/api/switch/state?pin=${pin}`), { method: 'POST' });
@@ -683,18 +696,16 @@ document.addEventListener('DOMContentLoaded', async () => {
             } else {
               showToast('error', 'Toggle Failed', 'Device returned an error.');
             }
-            setTimeout(() => { if (e.target) e.target.textContent = 'Toggle'; }, 400);
             pollDeviceData(); // force fast update
           } catch (err) {
             console.error('Toggle failed', err);
-            if (e.target) e.target.textContent = 'Toggle';
             showToast('error', 'Network Error', 'Could not reach the device.');
           }
         });
       });
 
       // Bind load-attach events
-      document.querySelectorAll('.load-attach-btn').forEach(el => {
+      document.querySelectorAll('.btn-manage-new').forEach(el => {
         el.addEventListener('click', (e) => {
           const pin = e.currentTarget.dataset.pin;
           const index = e.currentTarget.dataset.index;
@@ -717,10 +728,10 @@ document.addEventListener('DOMContentLoaded', async () => {
              h3.childNodes[0].textContent = displayName + " ";
           }
 
-          const btn = card.querySelector('.trigger-btn');
+          const btn = card.querySelector('.btn-toggle-new');
           if (btn) {
-            const isActive = sw.hasLoad && sw.load ? sw.load.state : (sw.state === 1);
-            btn.dataset.isactive = isActive;
+            btn.className = `btn-toggle-new ${loadState ? 'on' : ''}`;
+            btn.textContent = loadState ? 'Turn Off' : 'Turn On';
           }
 
           // Update load badge
@@ -735,14 +746,6 @@ document.addEventListener('DOMContentLoaded', async () => {
               loadBadgeEl.textContent = 'No Load';
               loadBadgeEl.style.opacity = '0.4';
             }
-          }
-
-          // Update load-attach button data
-          const attachBtn = card.querySelector('.load-attach-btn');
-          if (attachBtn) {
-            attachBtn.dataset.hasLoad = sw.hasLoad;
-            attachBtn.dataset.loadPin = sw.hasLoad && sw.load ? sw.load.pin : -1;
-            attachBtn.textContent = sw.hasLoad ? 'Manage Load' : 'Assign Load';
           }
         }
       });
@@ -767,7 +770,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     loads.forEach((load, index) => {
       const isOn = load.state === true;
       const div = document.createElement('div');
-      div.className = `load-card ${isOn ? 'active' : ''}`;
+      div.className = `glass-card load-card ${isOn ? 'active' : ''}`;
       div.id = `card-load-${load.pin}`;
 
       const displayName = load.name || `Load ${index + 1}`;
@@ -863,7 +866,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     scenesContainer.innerHTML = '';
     scenes.forEach(scene => {
       const div = document.createElement('div');
-      div.className = 'scene-card';
+      div.className = 'glass-card scene-card';
       
       let actionsSummary = '';
       if (scene.actions.length === 0) {
